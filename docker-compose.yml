@@ -1,0 +1,41 @@
+services:
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  server:
+    build: ./server
+    env_file:
+      - ./server/.env.example
+    ports:
+      - "4000:4000"
+    depends_on:
+      - mongodb
+      - redis
+
+  ai-service:
+    build: ./ai-service
+    env_file:
+      - ./ai-service/.env.example
+    ports:
+      - "8000:8000"
+
+  client:
+    build: ./client
+    env_file:
+      - ./client/.env.example
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
+volumes:
+  mongo_data:
