@@ -5,7 +5,6 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "strict": true,
-    "noEmit": true,
     "types": ["vite/client", "vitest/globals"],
     "baseUrl": "./src",
     "paths": {

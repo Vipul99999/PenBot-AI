@@ -64,7 +64,6 @@ npm run dev
 - `docs/SETUP.md`
 - `docs/FINAL_YEAR_REPORT.md`
 - `docs/PRESENTATION.md`
-- `docs/TROUBLESHOOTING.md`
 
 ## Deployment targets
 - Frontend → Vercel

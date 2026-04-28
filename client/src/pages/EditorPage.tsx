@@ -1,17 +1,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NoteEditor } from '@/editor/NoteEditor';
 import { notesApi } from '@/api/notes';
 import { http } from '@/api/http';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card } from '@/components/ui/Card';
 
 async function downloadAuthenticated(url: string, filename: string) {
   const token = localStorage.getItem('token');
-  const relative = url.replace(http.defaults.baseURL || '', '');
-  const { data } = await http.get(relative, {
+  const { data } = await http.get(url.replace(http.defaults.baseURL || '', ''), {
     responseType: 'blob',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined
   });
@@ -25,68 +21,45 @@ async function downloadAuthenticated(url: string, filename: string) {
 
 export function EditorPage() {
   const { id = '' } = useParams();
-  const { data, isLoading } = useQuery({ queryKey: ['note', id], queryFn: () => notesApi.get(id).then((r) => r.data), enabled: Boolean(id) });
+  const { data } = useQuery({ queryKey: ['note', id], queryFn: () => notesApi.get(id).then((r) => r.data), enabled: Boolean(id) });
   const [html, setHtml] = useState('');
   const [wrong, setWrong] = useState('');
   const [corrected, setCorrected] = useState('');
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    if (data?.extractedText) setHtml(data.extractedText);
-  }, [data?.extractedText]);
-
-  const save = useMutation({
-    mutationFn: () => notesApi.update(id, { extractedText: html }),
-    onSuccess: () => setMessage('Saved successfully.')
-  });
+  const save = useMutation({ mutationFn: () => notesApi.update(id, { extractedText: html }) });
   const summarize = useMutation({ mutationFn: () => notesApi.summary(id) });
   const flashcards = useMutation({ mutationFn: () => notesApi.flashcards(id) });
-  const correction = useMutation({
-    mutationFn: () => notesApi.correction(id, { wrong, corrected }),
-    onSuccess: () => {
-      setWrong('');
-      setCorrected('');
-      setMessage('Correction saved. It will be used on future OCR runs.');
-    }
-  });
-
-  if (isLoading) return <Card>Loading note...</Card>;
+  const correction = useMutation({ mutationFn: () => notesApi.correction(id, { wrong, corrected }) });
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
-      <Card>
-        <h3 className="font-semibold mb-2">Original / Confidence</h3>
+      <div className="glass p-4">
+        <h3>Original / Confidence</h3>
         {(data?.structuredBlocks || []).map((b: any, i: number) => (
-          <p key={i} className={b.confidence < 0.8 ? 'text-amber-300' : ''}>
-            {b.content} <span className="text-xs">({Math.round((b.confidence || 0) * 100)}%)</span>
-          </p>
+          <p key={i} className={b.confidence < 0.8 ? 'text-amber-300' : ''}>{b.content} <span className="text-xs">({Math.round((b.confidence || 0) * 100)}%)</span></p>
         ))}
-      </Card>
-
+      </div>
       <div className="space-y-3">
-        <NoteEditor content={html} onChange={setHtml} />
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button>
-          <Button onClick={() => summarize.mutate()} loading={summarize.isPending} className="bg-emerald-600">Summary</Button>
-          <Button onClick={() => flashcards.mutate()} loading={flashcards.isPending} className="bg-cyan-600">Flashcards</Button>
-          <Button onClick={() => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`)} className="bg-purple-600">PDF</Button>
-          <Button onClick={() => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`)} className="bg-purple-600">DOCX</Button>
-          <Button onClick={() => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`)} className="bg-purple-600">MD</Button>
-          <Button onClick={() => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`)} className="bg-purple-600">TXT</Button>
+        <NoteEditor content={data?.extractedText || ''} onChange={setHtml} />
+        <div className="space-x-2 flex flex-wrap gap-2">
+          <button onClick={() => save.mutate()} className="bg-brand px-4 py-2 rounded">Save</button>
+          <button onClick={() => summarize.mutate()} className="bg-emerald-600 px-4 py-2 rounded">Summary</button>
+          <button onClick={() => flashcards.mutate()} className="bg-cyan-600 px-4 py-2 rounded">Flashcards</button>
+          <button onClick={() => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`)} className="bg-purple-600 px-4 py-2 rounded">PDF</button>
+          <button onClick={() => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`)} className="bg-purple-600 px-4 py-2 rounded">DOCX</button>
+          <button onClick={() => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`)} className="bg-purple-600 px-4 py-2 rounded">MD</button>
+          <button onClick={() => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`)} className="bg-purple-600 px-4 py-2 rounded">TXT</button>
         </div>
-
-        <Card>
-          <h4 className="font-semibold">Personalized OCR learning</h4>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Input placeholder="Wrong word" value={wrong} onChange={(e) => setWrong(e.target.value)} className="max-w-44" />
-            <Input placeholder="Correct word" value={corrected} onChange={(e) => setCorrected(e.target.value)} className="max-w-44" />
-            <Button onClick={() => correction.mutate()} loading={correction.isPending} className="bg-orange-600">Learn</Button>
+        <div className="glass p-3 space-y-2">
+          <h4>Personalized OCR learning</h4>
+          <div className="flex gap-2">
+            <input className="p-2 text-black" placeholder="Wrong word" value={wrong} onChange={(e) => setWrong(e.target.value)} />
+            <input className="p-2 text-black" placeholder="Correct word" value={corrected} onChange={(e) => setCorrected(e.target.value)} />
+            <button onClick={() => correction.mutate()} className="bg-orange-600 px-3 rounded">Learn</button>
           </div>
-        </Card>
-
-        {message ? <Card>{message}</Card> : null}
-        {summarize.data ? <pre className="glass p-2 text-sm whitespace-pre-wrap">{JSON.stringify(summarize.data.data, null, 2)}</pre> : null}
-        {flashcards.data ? <pre className="glass p-2 text-sm whitespace-pre-wrap">{JSON.stringify(flashcards.data.data, null, 2)}</pre> : null}
+          {correction.isSuccess && <p className="text-green-300 text-sm">Correction saved.</p>}
+        </div>
+        {summarize.data && <pre className="glass p-2 text-sm">{JSON.stringify(summarize.data.data, null, 2)}</pre>}
+        {flashcards.data && <pre className="glass p-2 text-sm">{JSON.stringify(flashcards.data.data, null, 2)}</pre>}
       </div>
     </div>
   );
