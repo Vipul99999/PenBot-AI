@@ -1,0 +1,34 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { ArrowRight, CheckCircle2, FileText, Search, Sparkles, UploadCloud } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
+import { Layout } from '@/components/Layout';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { useAuthStore } from '@/store/authStore';
+import { DashboardPage } from './DashboardPage';
+import { UploadPage } from './UploadPage';
+import { EditorPage } from './EditorPage';
+import { SearchPage } from './SearchPage';
+import { LoginPage } from './LoginPage';
+import { RegisterPage } from './RegisterPage';
+function Home() {
+    const token = useAuthStore((s) => s.token);
+    if (token)
+        return _jsx(Navigate, { to: "/dashboard", replace: true });
+    return (_jsxs("main", { className: "min-h-screen bg-paper", children: [_jsxs("header", { className: "mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5 lg:px-8", children: [_jsx(BrandLogo, {}), _jsxs("div", { className: "flex shrink-0 items-center gap-2", children: [_jsx(Link, { to: "/login", className: "ghost-button", children: "Login" }), _jsx(Link, { to: "/register", className: "primary-button px-3 sm:px-4", children: "Start" })] })] }), _jsxs("section", { className: "mx-auto grid max-w-7xl gap-8 px-4 pb-12 pt-6 sm:px-6 sm:pt-8 lg:grid-cols-[1fr_0.95fr] lg:items-center lg:gap-10 lg:px-8", children: [_jsxs("div", { className: "space-y-7", children: [_jsxs("div", { className: "badge bg-mist text-brand", children: [_jsx(Sparkles, { size: 14 }), "Handwriting to searchable study notes"] }), _jsxs("div", { className: "space-y-4", children: [_jsx("h1", { className: "max-w-3xl text-3xl font-black leading-tight text-ink sm:text-5xl lg:text-6xl", children: "Turn handwritten pages into clean digital notes." }), _jsx("p", { className: "max-w-2xl text-base font-medium leading-7 text-ink/75 sm:text-lg sm:leading-8", children: "PenBot AI converts scans and PDFs into editable notes with confidence review, summaries, flashcards, search, and exports." })] }), _jsxs("div", { className: "grid gap-3 sm:flex sm:flex-wrap", children: [_jsxs(Link, { to: "/register", className: "primary-button w-full sm:w-auto", children: ["Create workspace", _jsx(ArrowRight, { size: 18 })] }), _jsx(Link, { to: "/login", className: "secondary-button w-full sm:w-auto", children: "Open existing" })] }), _jsx("div", { className: "grid max-w-2xl gap-3 sm:grid-cols-3", children: [
+                                    ['Upload', 'Images and PDFs'],
+                                    ['Edit', 'Tiptap note editor'],
+                                    ['Export', 'PDF, DOCX, MD, TXT']
+                                ].map(([title, copy]) => (_jsxs("div", { className: "soft-surface p-4", children: [_jsx("p", { className: "font-bold text-ink", children: title }), _jsx("p", { className: "mt-1 text-sm text-ink/60", children: copy })] }, title))) })] }), _jsxs("div", { className: "surface overflow-hidden", children: [_jsx("div", { className: "border-b border-ink/10 bg-white px-5 py-4", children: _jsx("p", { className: "text-sm font-bold text-ink", children: "Notebook Preview" }) }), _jsxs("div", { className: "grid gap-0 md:grid-cols-[0.82fr_1fr]", children: [_jsx("div", { className: "bg-mist p-5", children: _jsxs("div", { className: "rounded-lg bg-white p-5 shadow-sm", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsx("p", { className: "text-xs font-bold uppercase text-brand", children: "Converted page" }), _jsx("span", { className: "badge bg-emerald-100 text-emerald-800", children: "93% OCR" })] }), _jsxs("div", { className: "space-y-4", children: [_jsxs("div", { children: [_jsx("p", { className: "text-2xl font-black text-ink", children: "Computer Networks" }), _jsx("p", { className: "mt-1 text-sm leading-6 text-ink/75", children: "TCP provides reliable, ordered delivery of data between applications." })] }), _jsxs("div", { className: "rounded-md border border-ink/10 bg-paper p-3", children: [_jsx("p", { className: "text-xs font-bold uppercase text-ink/55", children: "Recognized formula" }), _jsx("p", { className: "mt-1 font-mono text-lg text-ink", children: "a^2 + b^2 = c^2" })] }), _jsxs("ul", { className: "space-y-2 text-sm text-ink/75", children: [_jsxs("li", { className: "flex gap-2", children: [_jsx("span", { className: "text-brand", children: "-" }), " TCP handles retransmission."] }), _jsxs("li", { className: "flex gap-2", children: [_jsx("span", { className: "text-brand", children: "-" }), " UDP is faster but connectionless."] }), _jsxs("li", { className: "flex gap-2", children: [_jsx("span", { className: "text-brand", children: "-" }), " Routing moves packets across networks."] })] })] })] }) }), _jsx("div", { className: "space-y-4 p-5", children: [
+                                            [FileText, 'Computer Networks', 'TCP provides reliable ordered delivery.'],
+                                            [CheckCircle2, 'Confidence Review', 'Low-confidence OCR lines stay visible.'],
+                                            [Search, 'Search Ready', 'Tags: CN, TCP, Protocols'],
+                                            [UploadCloud, 'Exports', 'PDF and DOCX are one click away.']
+                                        ].map(([Icon, title, copy]) => {
+                                            const TypedIcon = Icon;
+                                            return (_jsxs("div", { className: "flex gap-3", children: [_jsx("div", { className: "grid h-10 w-10 shrink-0 place-items-center rounded-md bg-mist text-brand", children: _jsx(TypedIcon, { size: 18 }) }), _jsxs("div", { children: [_jsx("p", { className: "font-bold text-ink", children: String(title) }), _jsx("p", { className: "text-sm text-ink/60", children: String(copy) })] })] }, String(title)));
+                                        }) })] })] })] })] }));
+}
+export function AppRouter() {
+    return (_jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(Home, {}) }), _jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsxs(Route, { element: _jsx(Layout, {}), children: [_jsx(Route, { path: "/dashboard", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/dashboard/upload", element: _jsx(ProtectedRoute, { children: _jsx(UploadPage, {}) }) }), _jsx(Route, { path: "/dashboard/editor/:id", element: _jsx(ProtectedRoute, { children: _jsx(EditorPage, {}) }) }), _jsx(Route, { path: "/dashboard/search", element: _jsx(ProtectedRoute, { children: _jsx(SearchPage, {}) }) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }));
+}

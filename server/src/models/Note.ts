@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Types } from 'mongoose';
 
 interface Block {
   type: 'title' | 'heading' | 'subheading' | 'paragraph' | 'bullet' | 'table' | 'code' | 'formula';
@@ -18,7 +18,7 @@ interface Correction {
 }
 
 export interface INote extends Document {
-  userId: string;
+  userId: Types.ObjectId;
   originalFile: string;
   extractedText: string;
   structuredBlocks: Block[];

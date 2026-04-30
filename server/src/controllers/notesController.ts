@@ -6,6 +6,21 @@ import { enqueueOCR } from '../queues/ocrQueue';
 import { aiClient } from '../services/aiClient';
 
 const correctionSchema = z.object({ wrong: z.string().min(1), corrected: z.string().min(1) });
+const updateNoteSchema = z.object({
+  extractedText: z.string().optional(),
+  structuredBlocks: z
+    .array(
+      z.object({
+        type: z.enum(['title', 'heading', 'subheading', 'paragraph', 'bullet', 'table', 'code', 'formula']),
+        content: z.string(),
+        confidence: z.number().min(0).max(1).optional()
+      })
+    )
+    .optional(),
+  tags: z.array(z.string()).optional(),
+  summary: z.string().optional(),
+  flashcards: z.array(z.object({ q: z.string(), a: z.string() })).optional()
+});
 
 export async function uploadNote(req: AuthRequest, res: Response) {
   if (!req.file) return res.status(400).json({ message: 'File required' });
@@ -37,7 +52,10 @@ export async function getNoteStatus(req: AuthRequest, res: Response) {
 }
 
 export async function updateNote(req: AuthRequest, res: Response) {
-  const note = await Note.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, req.body, { new: true });
+  const parsed = updateNoteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+
+  const note = await Note.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, parsed.data, { new: true });
   if (!note) return res.status(404).json({ message: 'Not found' });
   res.json(note);
 }

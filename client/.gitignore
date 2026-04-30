@@ -1,0 +1,36 @@
+node_modules
+.env
+.venv
+dist
+coverage
+uploads
+.DS_Store
+__pycache__/
+
+# Logs
+logs
+*.log
+# OS generated files
+.DS_Store
+Thumbs.db
+# IDE files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# Build files
+build/
+# Dependency directories
+node_modules/
+# Environment variables.env
+.env
+# Python virtual environment
+.venv/
+# Distribution files
+dist/
+
+# Coverage reports
+coverage/

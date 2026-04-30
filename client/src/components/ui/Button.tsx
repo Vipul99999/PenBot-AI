@@ -9,7 +9,7 @@ export function Button({ className = '', loading = false, children, disabled, ..
     <button
       {...rest}
       disabled={disabled || loading}
-      className={`rounded-xl bg-brand px-4 py-2 text-white disabled:opacity-60 disabled:cursor-not-allowed transition ${className}`}
+      className={`primary-button ${className}`}
     >
       {loading ? 'Please wait...' : children}
     </button>

@@ -27,7 +27,7 @@ def build_blocks(text: str) -> list[dict[str, Any]]:
             block_type = "title"
         elif line.startswith(("-", "*")):
             block_type = "bullet"
-        elif re.search(r"=|\+|\^", line):
+        elif re.search(r"=|\+|\^|²", line):
             block_type = "formula"
         elif "{" in line and "}" in line:
             block_type = "code"
@@ -41,7 +41,7 @@ def build_blocks(text: str) -> list[dict[str, Any]]:
 
 
 def to_latex(expr: str) -> str:
-    return expr.replace("²", "^2")
+    return expr.replace("Â²", "^2").replace("²", "^2")
 
 
 def apply_user_corrections(user_id: str, text: str, corrections: dict[str, dict[str, str]]) -> str:

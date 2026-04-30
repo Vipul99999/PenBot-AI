@@ -1,5 +1,5 @@
 import { PropsWithChildren } from 'react';
 
 export function Card({ children }: PropsWithChildren) {
-  return <div className="glass p-4">{children}</div>;
+  return <div className="surface p-4">{children}</div>;
 }
