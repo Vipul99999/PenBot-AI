@@ -35,7 +35,7 @@ export function Layout() {
                 end={item.to === '/dashboard'}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition ${
-                    isActive ? 'bg-brand text-white shadow-sm' : 'text-ink/75 hover:bg-mist hover:text-ink'
+                    isActive ? 'bg-brand text-white shadow-sm' : 'text-ink hover:bg-mist hover:text-ink'
                   }`
                 }
               >
@@ -54,13 +54,13 @@ export function Layout() {
               <BrandLogo compact />
             </Link>
             <div className="hidden lg:block">
-              <p className="text-sm font-semibold text-ink/60">Workspace</p>
-              <p className="text-xl font-bold text-ink">Handwritten Notes</p>
+              <p className="text-sm font-black uppercase text-brand">Workspace</p>
+              <p className="text-xl font-black text-ink">Handwritten Notes</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="hidden text-right sm:block">
-                <p className="text-sm font-semibold text-ink">{user?.name || 'Student'}</p>
-                <p className="text-xs text-ink/55">PenBot workspace</p>
+                <p className="text-sm font-black text-ink">{user?.name || 'Student'}</p>
+                <p className="text-xs font-bold text-ink">PenBot workspace</p>
               </div>
               <button onClick={signOut} className="icon-button" title="Logout" aria-label="Logout">
                 <LogOut size={18} />
@@ -77,7 +77,7 @@ export function Layout() {
                   end={item.to === '/dashboard'}
                   className={({ isActive }) =>
                     `flex min-h-12 items-center justify-center gap-1.5 px-2 py-3 text-xs font-semibold sm:gap-2 sm:text-sm ${
-                      isActive ? 'text-brand' : 'text-ink/60'
+                      isActive ? 'text-brand' : 'text-ink'
                     }`
                   }
                 >

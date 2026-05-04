@@ -6,21 +6,25 @@ PenBot AI is a full-stack web application that converts handwritten notes (image
 
 ## Monorepo apps
 - `client` — React + TypeScript + Vite + Tailwind + Tiptap
-- `server` — Node.js + Express + TypeScript + MongoDB + JWT + BullMQ + Redis
-- `ai-service` — FastAPI + OCR/NLP pipeline scaffold for transformer integration
+- `server` — Node.js + Express + TypeScript + MongoDB + JWT
+- `ai-service` — FastAPI + free local OCR/NLP pipeline with optional vision-model upgrade
 
 ## Implemented features
 - Authentication: register/login/me/forgot/reset password
 - Upload: JPG/PNG/JPEG/PDF
-- Async OCR queue processing
-- Smart structured blocks + confidence highlight support
-- Formula normalization (`²` → `^2`) and code/table-compatible block typing
+- Async OCR in-process background processing
+- Free local OCR preprocessing: auto-crop, deskew, contrast boost, shadow/noise cleanup, multiple OCR passes, and stronger scanned-PDF rendering
+- Upload scan quality check with focus, contrast, brightness, and retake/crop suggestions
+- Smart structured blocks: title, headings, bullets, definitions, Q&A, formulas, code, and paragraphs
+- Formula normalization (`²` → `^2`) and study-note block typing
 - Summary and flashcards generation
 - Subject tagging (DSA/OS/DBMS/CN/AI)
-- Personalized OCR learning endpoint for correction feedback
+- Manual correction workflow that updates the current note and teaches future OCR retries
 - Search with MongoDB text index
 - Rich editing (Tiptap)
-- Export PDF, DOCX, Markdown, TXT
+- Polished study-note export to PDF, DOCX, Markdown, TXT
+- Demo mode sample notes from the upload page
+- Persistent original uploads stored in MongoDB GridFS for preview and OCR retry after deploy/restart
 
 ## Quick start (Docker)
 ```bash

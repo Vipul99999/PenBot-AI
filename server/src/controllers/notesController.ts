@@ -1,9 +1,11 @@
 import { Response } from 'express';
+import path from 'node:path';
 import { z } from 'zod';
 import { Note } from '../models/Note';
 import { AuthRequest } from '../middleware/auth';
 import { enqueueOCR } from '../queues/ocrQueue';
 import { aiClient } from '../services/aiClient';
+import { deleteStoredFile, openStoredFileStream, saveUpload } from '../services/fileStore';
 
 const correctionSchema = z.object({ wrong: z.string().min(1), corrected: z.string().min(1) });
 const updateNoteSchema = z.object({
@@ -11,9 +13,10 @@ const updateNoteSchema = z.object({
   structuredBlocks: z
     .array(
       z.object({
-        type: z.enum(['title', 'heading', 'subheading', 'paragraph', 'bullet', 'table', 'code', 'formula']),
+        type: z.enum(['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'table', 'code', 'formula']),
         content: z.string(),
-        confidence: z.number().min(0).max(1).optional()
+        confidence: z.number().min(0).max(1).optional(),
+        page: z.number().int().min(1).optional()
       })
     )
     .optional(),
@@ -22,15 +25,25 @@ const updateNoteSchema = z.object({
   flashcards: z.array(z.object({ q: z.string(), a: z.string() })).optional()
 });
 
+function applyCorrection(text: string, wrong: string, corrected: string) {
+  if (!text) return text;
+  const escaped = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(escaped, 'gi'), corrected);
+}
+
 export async function uploadNote(req: AuthRequest, res: Response) {
   if (!req.file) return res.status(400).json({ message: 'File required' });
+  const storedFile = await saveUpload(req.file);
   const note = await Note.create({
     userId: req.userId,
-    originalFile: req.file.path,
+    fileId: storedFile.fileId,
+    originalFilename: storedFile.filename,
+    originalMimeType: storedFile.mimetype,
+    originalSize: storedFile.size,
     status: 'queued'
   });
 
-  await enqueueOCR(note.id, req.file.path, String(req.userId));
+  await enqueueOCR(note.id, String(req.userId));
   res.status(202).json(note);
 }
 
@@ -46,9 +59,44 @@ export async function getNote(req: AuthRequest, res: Response) {
 }
 
 export async function getNoteStatus(req: AuthRequest, res: Response) {
-  const note = await Note.findOne({ _id: req.params.id, userId: req.userId }).select('status');
+  const note = await Note.findOne({ _id: req.params.id, userId: req.userId }).select('status ocrError');
   if (!note) return res.status(404).json({ message: 'Not found' });
-  res.json({ status: note.status });
+  res.json({ status: note.status, ocrError: note.ocrError });
+}
+
+export async function previewOriginal(req: AuthRequest, res: Response) {
+  const note = await Note.findOne({ _id: req.params.id, userId: req.userId }).select('fileId originalFile originalFilename originalMimeType originalSize');
+  if (!note) return res.status(404).json({ message: 'Not found' });
+
+  if (note.fileId) {
+    res.setHeader('Content-Type', note.originalMimeType || 'application/octet-stream');
+    if (note.originalSize) res.setHeader('Content-Length', String(note.originalSize));
+    res.setHeader('Content-Disposition', `inline; filename="${note.originalFilename || 'upload'}"`);
+    openStoredFileStream(note.fileId).on('error', () => res.status(404).end()).pipe(res);
+    return;
+  }
+
+  const uploadRoot = path.resolve('uploads');
+  const filePath = path.resolve(note.originalFile || '');
+  const isInsideUploads = filePath === uploadRoot || filePath.startsWith(`${uploadRoot}${path.sep}`);
+  if (!isInsideUploads) return res.status(403).json({ message: 'Invalid file path' });
+
+  res.sendFile(filePath);
+}
+
+export async function retryOCR(req: AuthRequest, res: Response) {
+  const note = await Note.findOne({ _id: req.params.id, userId: req.userId });
+  if (!note) return res.status(404).json({ message: 'Not found' });
+
+  note.status = 'queued';
+  note.ocrError = '';
+  note.extractedText = '';
+  note.structuredBlocks = [];
+  note.tags = [];
+  await note.save();
+
+  await enqueueOCR(note.id, String(req.userId));
+  res.status(202).json(note);
 }
 
 export async function updateNote(req: AuthRequest, res: Response) {
@@ -63,6 +111,7 @@ export async function updateNote(req: AuthRequest, res: Response) {
 export async function deleteNote(req: AuthRequest, res: Response) {
   const note = await Note.findOneAndDelete({ _id: req.params.id, userId: req.userId });
   if (!note) return res.status(404).json({ message: 'Not found' });
+  await deleteStoredFile(note.fileId);
   res.status(204).send();
 }
 
@@ -81,6 +130,11 @@ export async function addCorrection(req: AuthRequest, res: Response) {
   if (!note) return res.status(404).json({ message: 'Not found' });
 
   note.corrections.push({ ...parsed.data, createdAt: new Date() });
+  note.extractedText = applyCorrection(note.extractedText, parsed.data.wrong, parsed.data.corrected);
+  note.structuredBlocks = note.structuredBlocks.map((block) => ({
+    ...block,
+    content: applyCorrection(block.content, parsed.data.wrong, parsed.data.corrected)
+  }));
   await note.save();
 
   await aiClient.post('/ocr/learn-correction', {
@@ -89,5 +143,5 @@ export async function addCorrection(req: AuthRequest, res: Response) {
     corrected: parsed.data.corrected
   });
 
-  res.status(201).json({ message: 'Correction saved' });
+  res.status(201).json({ message: 'Correction applied', note });
 }

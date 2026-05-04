@@ -12,6 +12,7 @@
 - GET `/api/notes`
 - GET `/api/notes/search?q=...`
 - GET `/api/notes/:id`
+- GET `/api/notes/:id/original` - streams the GridFS original upload for preview
 - GET `/api/notes/:id/status`
 - PUT `/api/notes/:id`
 - POST `/api/notes/:id/corrections`

@@ -1,9 +1,10 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 interface Block {
-  type: 'title' | 'heading' | 'subheading' | 'paragraph' | 'bullet' | 'table' | 'code' | 'formula';
+  type: 'title' | 'heading' | 'subheading' | 'paragraph' | 'bullet' | 'definition' | 'question' | 'answer' | 'table' | 'code' | 'formula';
   content: string;
   confidence?: number;
+  page?: number;
 }
 
 interface Flashcard {
@@ -19,7 +20,11 @@ interface Correction {
 
 export interface INote extends Document {
   userId: Types.ObjectId;
-  originalFile: string;
+  originalFile?: string;
+  fileId?: Types.ObjectId;
+  originalFilename?: string;
+  originalMimeType?: string;
+  originalSize?: number;
   extractedText: string;
   structuredBlocks: Block[];
   summary: string;
@@ -27,30 +32,37 @@ export interface INote extends Document {
   tags: string[];
   corrections: Correction[];
   status: 'queued' | 'processing' | 'done' | 'failed';
+  ocrError?: string;
   createdAt: Date;
 }
 
 const noteSchema = new Schema<INote>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    originalFile: { type: String, required: true },
+    originalFile: { type: String },
+    fileId: { type: Schema.Types.ObjectId },
+    originalFilename: { type: String },
+    originalMimeType: { type: String },
+    originalSize: { type: Number },
     extractedText: { type: String, default: '' },
     structuredBlocks: [
       {
         type: {
           type: String,
-          enum: ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'table', 'code', 'formula'],
+          enum: ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'table', 'code', 'formula'],
           required: true
         },
         content: { type: String, required: true },
-        confidence: { type: Number }
+        confidence: { type: Number },
+        page: { type: Number, default: 1 }
       }
     ],
     summary: { type: String, default: '' },
     flashcards: [{ q: String, a: String }],
     tags: [{ type: String }],
     corrections: [{ wrong: String, corrected: String, createdAt: { type: Date, default: Date.now } }],
-    status: { type: String, enum: ['queued', 'processing', 'done', 'failed'], default: 'queued' }
+    status: { type: String, enum: ['queued', 'processing', 'done', 'failed'], default: 'queued' },
+    ocrError: { type: String, default: '' }
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

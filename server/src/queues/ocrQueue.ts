@@ -1,41 +1,43 @@
-import fs from 'node:fs';
-import { Job, Queue, Worker } from 'bullmq';
-import IORedis from 'ioredis';
 import FormData from 'form-data';
-import { env } from '../config/env';
 import { aiClient } from '../services/aiClient';
 import { Note } from '../models/Note';
+import { readStoredFile } from '../services/fileStore';
 
-const connection = process.env.NODE_ENV === 'test' ? null : new IORedis(env.redisUrl, { maxRetriesPerRequest: null });
+type OCRJob = {
+  noteId: string;
+  userId: string;
+};
 
-export const ocrQueue = connection ? new Queue('ocr-jobs', { connection }) : null;
-
-export async function enqueueOCR(noteId: string, filePath: string, userId: string) {
-  if (!ocrQueue) {
-    runFallbackOCR({ noteId, filePath, userId });
-    return;
-  }
-
-  try {
-    await ocrQueue.add('process-note', { noteId, filePath, userId }, { attempts: 3, backoff: { type: 'exponential', delay: 2000 } });
-  } catch {
-    runFallbackOCR({ noteId, filePath, userId });
-  }
+export async function enqueueOCR(noteId: string, userId: string) {
+  runOCRInBackground({ noteId, userId });
 }
 
-function runFallbackOCR(payload: { noteId: string; filePath: string; userId: string }) {
-  void processNote(payload).catch(async () => {
-    await Note.findByIdAndUpdate(payload.noteId, { status: 'failed' });
+function runOCRInBackground(payload: OCRJob) {
+  void processNote(payload).catch(async (error) => {
+    console.error(`OCR failed for note ${payload.noteId}`, error);
+    const message = error?.response?.data?.detail || error?.message || 'OCR failed. Try a clearer upload.';
+    await Note.findByIdAndUpdate(payload.noteId, {
+      status: 'failed',
+      ocrError: message,
+      structuredBlocks: [],
+      tags: []
+    });
   });
 }
 
-async function processNote({ noteId, filePath, userId }: { noteId: string; filePath: string; userId: string }) {
-  await Note.findByIdAndUpdate(noteId, { status: 'processing' });
+async function processNote({ noteId, userId }: OCRJob) {
+  await Note.findByIdAndUpdate(noteId, { status: 'processing', ocrError: '' });
+  const note = await Note.findById(noteId).select('fileId originalFile originalFilename originalMimeType');
+  if (!note) throw new Error('Note not found');
+  const storedFile = await readStoredFile(note.fileId, note.originalFile);
 
   const form = new FormData();
   form.append('noteId', noteId);
   form.append('userId', userId);
-  form.append('file', fs.createReadStream(filePath));
+  form.append('file', storedFile.buffer, {
+    filename: storedFile.filename,
+    contentType: storedFile.mimetype
+  });
 
   const { data } = await aiClient.post('/ocr/process', form, { headers: form.getHeaders() });
 
@@ -43,22 +45,7 @@ async function processNote({ noteId, filePath, userId }: { noteId: string; fileP
     extractedText: data.extractedText,
     structuredBlocks: data.structuredBlocks,
     tags: data.tags,
-    status: 'done'
+    status: 'done',
+    ocrError: ''
   });
 }
-
-export const ocrWorker = connection
-  ? new Worker(
-      'ocr-jobs',
-      async (job: Job) => {
-        await processNote(job.data as { noteId: string; filePath: string; userId: string });
-      },
-      { connection }
-    )
-  : null;
-
-ocrWorker?.on('failed', async (job) => {
-  if (job?.data?.noteId) {
-    await Note.findByIdAndUpdate(job.data.noteId, { status: 'failed' });
-  }
-});

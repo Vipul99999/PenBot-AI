@@ -36,6 +36,7 @@
 - Register and login from `/register` and `/login`.
 - Upload a sample note in `/dashboard/upload`.
 - Open note in editor and confirm status updates to `done`.
+- Refresh/restart the backend and confirm the original preview still opens; uploaded originals are stored in MongoDB GridFS.
 - Generate summary + flashcards.
 - Add correction in Personalized OCR learning panel.
 - Export PDF/DOCX/MD/TXT.
