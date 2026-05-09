@@ -20,9 +20,15 @@ services:
       - mongodb
 
   ai-service:
-    build: ./ai-service
+    build:
+      context: ./ai-service
+      args:
+        INSTALL_VISION: "true"
     env_file:
       - ./ai-service/.env.example
+    environment:
+      ENABLE_TROCR: "true"
+      OCR_SPACE_API_KEY: ""
     ports:
       - "8000:8000"
 

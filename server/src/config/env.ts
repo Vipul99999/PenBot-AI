@@ -12,10 +12,19 @@ function resolveAiServiceUrl() {
   return configuredUrl;
 }
 
+function resolveJwtSecret() {
+  const secret = process.env.JWT_SECRET || 'change_me';
+  if (process.env.NODE_ENV === 'production' && secret === 'change_me') {
+    throw new Error('JWT_SECRET must be set to a strong unique value in production.');
+  }
+  return secret;
+}
+
 export const env = {
+  nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4000),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/penbot',
-  jwtSecret: process.env.JWT_SECRET || 'change_me',
+  jwtSecret: resolveJwtSecret(),
   aiServiceUrl: resolveAiServiceUrl(),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173'
 };

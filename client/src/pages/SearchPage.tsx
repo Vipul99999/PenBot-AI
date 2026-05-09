@@ -8,6 +8,10 @@ function stripHtml(value = '') {
   return value.replace(/<[^>]*>/g, '').trim();
 }
 
+function noteTitle(note: any) {
+  return note.title || note.structuredBlocks?.find((block: any) => block.type === 'title')?.content || 'Untitled note';
+}
+
 export function SearchPage() {
   const [q, setQ] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -49,6 +53,7 @@ export function SearchPage() {
       <div className="grid gap-3">
         {data.map((note: any) => (
           <Link to={`/dashboard/editor/${note._id}`} key={note._id} className="surface block p-5 transition hover:shadow-lg">
+            <h3 className="mb-2 text-lg font-black text-ink">{noteTitle(note)}</h3>
             <p className="text-sm font-medium leading-6 text-ink">{stripHtml(note.extractedText).slice(0, 240) || note.originalFile}</p>
             {!!note.tags?.length && (
               <div className="mt-3 flex flex-wrap gap-2">

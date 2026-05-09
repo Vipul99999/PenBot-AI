@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { authApi } from '@/api/auth';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useAuthStore } from '@/store/authStore';
@@ -13,13 +13,20 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const setAuth = useAuthStore((s) => s.setAuth);
   const nav = useNavigate();
+  const passwordChecks = [
+    { label: '8+ characters', ok: password.length >= 8 },
+    { label: 'Uppercase letter', ok: /[A-Z]/.test(password) },
+    { label: 'Lowercase letter', ok: /[a-z]/.test(password) },
+    { label: 'Number', ok: /[0-9]/.test(password) }
+  ];
+  const canSubmit = name.trim().length >= 2 && email.trim().includes('@') && passwordChecks.every((item) => item.ok);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const { data } = await authApi.register({ name, email, password });
+      const { data } = await authApi.register({ name: name.trim(), email: email.trim().toLowerCase(), password });
       setAuth(data.token, data.user);
       nav('/dashboard');
     } catch (err: any) {
@@ -59,10 +66,18 @@ export function RegisterPage() {
             <p className="mt-2 font-medium text-ink/75">Start with your first upload.</p>
           </div>
           {error && <div className="rounded-md border border-coral/30 bg-coral/10 p-3 text-sm font-medium text-coral">{error}</div>}
-          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="field" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="field" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button disabled={loading} className="primary-button w-full">
+          <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required />
+          <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+          <input className="field" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
+          <div className="grid gap-2 rounded-lg border border-ink/10 bg-mist/60 p-3">
+            {passwordChecks.map((item) => (
+              <p key={item.label} className={`flex items-center gap-2 text-sm font-bold ${item.ok ? 'text-emerald-700' : 'text-ink/65'}`}>
+                <CheckCircle2 size={15} />
+                {item.label}
+              </p>
+            ))}
+          </div>
+          <button disabled={loading || !canSubmit} className="primary-button w-full">
             {loading ? 'Creating...' : 'Create workspace'}
             {!loading && <ArrowRight size={18} />}
           </button>

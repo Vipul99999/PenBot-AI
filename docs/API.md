@@ -22,6 +22,9 @@
 - POST `/api/ai/summary/:id`
 - POST `/api/ai/flashcards/:id`
 
+## System
+- GET `/api/system/readiness` - checks backend, MongoDB/GridFS, AI service, OCR providers, and local-first cost mode
+
 ## Export
 - GET `/api/export/pdf/:id`
 - GET `/api/export/docx/:id`

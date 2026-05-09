@@ -18,7 +18,7 @@ export function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await authApi.login({ email, password });
+      const { data } = await authApi.login({ email: email.trim().toLowerCase(), password });
       setAuth(data.token, data.user);
       nav('/dashboard');
     } catch (err: any) {
@@ -58,13 +58,16 @@ export function LoginPage() {
             <p className="mt-2 font-medium text-ink/75">Sign in to continue.</p>
           </div>
           {error && <div className="rounded-md border border-coral/30 bg-coral/10 p-3 text-sm font-medium text-coral">{error}</div>}
-          <input className="field" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="field" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input className="field" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+          <input className="field" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
           <button disabled={loading} className="primary-button w-full">
             {loading ? 'Logging in...' : 'Login'}
             {!loading && <ArrowRight size={18} />}
           </button>
-          <p className="text-sm font-medium text-ink/75">New here? <Link className="font-bold text-brand" to="/register">Create account</Link></p>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-medium text-ink/75">
+            <span>New here? <Link className="font-bold text-brand" to="/register">Create account</Link></span>
+            <Link className="font-bold text-brand" to="/forgot-password">Forgot password?</Link>
+          </div>
         </form>
       </section>
     </main>

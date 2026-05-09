@@ -6,6 +6,9 @@ export interface IUser extends Document {
   passwordHash: string;
   resetTokenHash?: string;
   resetTokenExpiresAt?: Date;
+  failedLoginAttempts: number;
+  lockedUntil?: Date;
+  lastLoginAt?: Date;
   createdAt: Date;
 }
 
@@ -15,7 +18,10 @@ const userSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, index: true },
     passwordHash: { type: String, required: true },
     resetTokenHash: { type: String },
-    resetTokenExpiresAt: { type: Date }
+    resetTokenExpiresAt: { type: Date },
+    failedLoginAttempts: { type: Number, default: 0 },
+    lockedUntil: { type: Date },
+    lastLoginAt: { type: Date }
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

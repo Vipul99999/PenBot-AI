@@ -40,3 +40,11 @@
 - Generate summary + flashcards.
 - Add correction in Personalized OCR learning panel.
 - Export PDF/DOCX/MD/TXT.
+
+## Production security checklist
+- Set `NODE_ENV=production`.
+- Replace `JWT_SECRET=change_me` with a long random secret before deploy.
+- Configure a real email provider before sending public password reset emails.
+- Use HTTPS for the frontend and API.
+- Keep MongoDB private; expose only the backend and frontend publicly.
+- Keep original uploads in GridFS or another persistent storage provider.

@@ -3,11 +3,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: '#C0265A',
-        ink: '#20242C',
-        paper: '#F1F0FF',
-        mist: '#E8F7FF',
-        coral: '#D64545'
+        brand: '#0F766E',
+        ink: '#18212F',
+        paper: '#F7F4EA',
+        mist: '#E8F2EF',
+        coral: '#B42318'
       }
     }
   },

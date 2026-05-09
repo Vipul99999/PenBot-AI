@@ -8,6 +8,14 @@ type OCRJob = {
   userId: string;
 };
 
+function titleFromOcr(data: any, fallback: string) {
+  const blocks = Array.isArray(data?.structuredBlocks) ? data.structuredBlocks : [];
+  const titleBlock = blocks.find((block: any) => block?.type === 'title' && String(block?.content || '').trim());
+  const firstBlock = blocks.find((block: any) => String(block?.content || '').trim());
+  const candidate = String(titleBlock?.content || firstBlock?.content || '').trim();
+  return candidate ? candidate.slice(0, 120) : fallback;
+}
+
 export async function enqueueOCR(noteId: string, userId: string) {
   runOCRInBackground({ noteId, userId });
 }
@@ -27,7 +35,7 @@ function runOCRInBackground(payload: OCRJob) {
 
 async function processNote({ noteId, userId }: OCRJob) {
   await Note.findByIdAndUpdate(noteId, { status: 'processing', ocrError: '' });
-  const note = await Note.findById(noteId).select('fileId originalFile originalFilename originalMimeType');
+  const note = await Note.findById(noteId).select('title fileId originalFile originalFilename originalMimeType');
   if (!note) throw new Error('Note not found');
   const storedFile = await readStoredFile(note.fileId, note.originalFile);
 
@@ -42,6 +50,7 @@ async function processNote({ noteId, userId }: OCRJob) {
   const { data } = await aiClient.post('/ocr/process', form, { headers: form.getHeaders() });
 
   await Note.findByIdAndUpdate(noteId, {
+    title: titleFromOcr(data, note.title || storedFile.filename),
     extractedText: data.extractedText,
     structuredBlocks: data.structuredBlocks,
     tags: data.tags,

@@ -11,6 +11,7 @@ export const notesApi = {
     status: (id) => http.get(`/api/notes/${id}/status`),
     retryOcr: (id) => http.post(`/api/notes/${id}/retry-ocr`),
     update: (id, payload) => http.put(`/api/notes/${id}`, payload),
+    delete: (id) => http.delete(`/api/notes/${id}`),
     correction: (id, payload) => http.post(`/api/notes/${id}/corrections`, payload),
     search: (q) => http.get(`/api/notes/search?q=${encodeURIComponent(q)}`),
     summary: (id) => http.post(`/api/ai/summary/${id}`),

@@ -7,6 +7,7 @@ import authRoutes from './routes/authRoutes';
 import notesRoutes from './routes/notesRoutes';
 import aiRoutes from './routes/aiRoutes';
 import exportRoutes from './routes/exportRoutes';
+import systemRoutes from './routes/systemRoutes';
 import { errorMiddleware } from './middleware/error';
 import { env } from './config/env';
 
@@ -22,5 +23,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/notes', notesRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/export', exportRoutes);
+app.use('/api/system', systemRoutes);
 
 app.use(errorMiddleware);

@@ -11,6 +11,8 @@ import { EditorPage } from './EditorPage';
 import { SearchPage } from './SearchPage';
 import { LoginPage } from './LoginPage';
 import { RegisterPage } from './RegisterPage';
+import { ForgotPasswordPage } from './ForgotPasswordPage';
+import { ResetPasswordPage } from './ResetPasswordPage';
 function Home() {
     const token = useAuthStore((s) => s.token);
     if (token)
@@ -30,5 +32,5 @@ function Home() {
                                         }) })] })] })] })] }));
 }
 export function AppRouter() {
-    return (_jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(Home, {}) }), _jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsxs(Route, { element: _jsx(Layout, {}), children: [_jsx(Route, { path: "/dashboard", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/dashboard/upload", element: _jsx(ProtectedRoute, { children: _jsx(UploadPage, {}) }) }), _jsx(Route, { path: "/dashboard/editor/:id", element: _jsx(ProtectedRoute, { children: _jsx(EditorPage, {}) }) }), _jsx(Route, { path: "/dashboard/search", element: _jsx(ProtectedRoute, { children: _jsx(SearchPage, {}) }) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }));
+    return (_jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(Home, {}) }), _jsx(Route, { path: "/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/register", element: _jsx(RegisterPage, {}) }), _jsx(Route, { path: "/forgot-password", element: _jsx(ForgotPasswordPage, {}) }), _jsx(Route, { path: "/reset-password", element: _jsx(ResetPasswordPage, {}) }), _jsxs(Route, { element: _jsx(Layout, {}), children: [_jsx(Route, { path: "/dashboard", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/dashboard/upload", element: _jsx(ProtectedRoute, { children: _jsx(UploadPage, {}) }) }), _jsx(Route, { path: "/dashboard/editor/:id", element: _jsx(ProtectedRoute, { children: _jsx(EditorPage, {}) }) }), _jsx(Route, { path: "/dashboard/search", element: _jsx(ProtectedRoute, { children: _jsx(SearchPage, {}) }) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }));
 }

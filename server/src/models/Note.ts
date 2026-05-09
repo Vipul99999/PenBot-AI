@@ -1,7 +1,29 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 interface Block {
-  type: 'title' | 'heading' | 'subheading' | 'paragraph' | 'bullet' | 'definition' | 'question' | 'answer' | 'table' | 'code' | 'formula';
+  type:
+    | 'title'
+    | 'heading'
+    | 'subheading'
+    | 'paragraph'
+    | 'bullet'
+    | 'numbered'
+    | 'step'
+    | 'definition'
+    | 'theorem'
+    | 'important'
+    | 'example'
+    | 'objective'
+    | 'materials'
+    | 'observation'
+    | 'result'
+    | 'conclusion'
+    | 'exam_tip'
+    | 'question'
+    | 'answer'
+    | 'table'
+    | 'code'
+    | 'formula';
   content: string;
   confidence?: number;
   page?: number;
@@ -20,6 +42,7 @@ interface Correction {
 
 export interface INote extends Document {
   userId: Types.ObjectId;
+  title: string;
   originalFile?: string;
   fileId?: Types.ObjectId;
   originalFilename?: string;
@@ -39,6 +62,7 @@ export interface INote extends Document {
 const noteSchema = new Schema<INote>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    title: { type: String, default: 'Untitled note', trim: true },
     originalFile: { type: String },
     fileId: { type: Schema.Types.ObjectId },
     originalFilename: { type: String },
@@ -49,7 +73,7 @@ const noteSchema = new Schema<INote>(
       {
         type: {
           type: String,
-          enum: ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'table', 'code', 'formula'],
+          enum: ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'numbered', 'step', 'definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer', 'table', 'code', 'formula'],
           required: true
         },
         content: { type: String, required: true },
@@ -68,6 +92,6 @@ const noteSchema = new Schema<INote>(
 );
 
 noteSchema.index({ userId: 1, createdAt: -1 });
-noteSchema.index({ extractedText: 'text', tags: 'text' });
+noteSchema.index({ title: 'text', extractedText: 'text', tags: 'text' });
 
 export const Note = mongoose.model<INote>('Note', noteSchema);

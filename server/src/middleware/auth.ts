@@ -7,11 +7,13 @@ export interface AuthRequest extends Request {
 }
 
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ message: 'Unauthorized' });
+  const authHeader = req.headers.authorization || '';
+  const [scheme, token] = authHeader.split(' ');
+  if (scheme !== 'Bearer' || !token) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
     const payload = jwt.verify(token, env.jwtSecret) as { id: string };
+    if (!payload.id) return res.status(401).json({ message: 'Invalid token' });
     req.userId = payload.id;
     next();
   } catch {

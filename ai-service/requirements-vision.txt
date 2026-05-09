@@ -1,0 +1,7 @@
+# Optional high-accuracy handwriting OCR stack.
+# Install this only on machines with enough RAM/disk, preferably with a GPU.
+-r requirements.txt
+torch
+transformers
+sentencepiece
+protobuf

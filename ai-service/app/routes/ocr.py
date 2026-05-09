@@ -1,153 +1,21 @@
 import io
-from google.cloud import vision
-import base64
-import json
 import os
-import urllib.error
+import urllib.parse
 import urllib.request
-import requests
 from functools import lru_cache
-from dotenv import load_dotenv
-load_dotenv()
+from typing import Any
+
 import fitz
+from dotenv import load_dotenv
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from app.services.pipeline import build_blocks, detect_tags, to_latex, apply_user_corrections
 
+from app.services.pipeline import apply_user_corrections, build_blocks, detect_tags, to_latex
+
+load_dotenv()
 router = APIRouter()
 
-print("OCR route loaded")
-print("OpenAI API key:", "set" if os.getenv("OPENAI_API_KEY") else "not set")
-print("Google creds:", os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-print("Google creds exists:", os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")))
-def enhanced_image_bytes(content: bytes) -> bytes:
-    image = prepare_image(content)
-    output = io.BytesIO()
-    image.save(output, format="PNG")
-    return output.getvalue()
 
-def extract_with_google_vision(filename: str, content: bytes) -> str | None:
-    try:
-        lower_name = (filename or "").lower()
-
-        if lower_name.endswith(".pdf"):
-            # Google Vision direct local PDF bytes ke liye simple sync OCR nahi karta.
-            # PDF ke first few pages ko image bana kar OCR karenge.
-            texts = []
-
-            with fitz.open(stream=content, filetype="pdf") as document:
-                max_pages = min(document.page_count, 5)
-
-                for page_index in range(max_pages):
-                    page = document[page_index]
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                    image_bytes = pixmap.tobytes("png")
-
-                    page_text = extract_google_vision_image(image_bytes)
-                    if page_text:
-                        texts.append(f"Page {page_index + 1}\n{page_text}")
-
-            return "\n\n".join(texts).strip() or None
-
-        # Image OCR
-        image_bytes = content
-        return extract_google_vision_image(image_bytes)
-
-    except Exception as e:
-        print("Google Vision OCR error:", repr(e))
-        return None
-
-
-def extract_google_vision_image(content: bytes) -> str | None:
-    try:
-        client = vision.ImageAnnotatorClient()
-        image = vision.Image(content=content)
-
-        response = client.document_text_detection(image=image)
-
-        if response.error.message:
-            print("Google Vision response error:", response.error.message)
-            return None
-
-        text = response.full_text_annotation.text.strip()
-
-        print("Google Vision text found:", bool(text))
-        if text:
-            print("Google Vision preview:", text[:200])
-
-        return text or None
-
-    except Exception as e:
-        print("Google Vision image error:", repr(e))
-        return None
-
-def extract_with_ocr_space(filename: str, content: bytes) -> str | None:
-    api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld")
-    lower_name = (filename or "").lower()
-
-    try:
-        # PDF ko direct bhejo, image ko enhance karke bhejo
-        if lower_name.endswith(".pdf"):
-            upload_name = filename or "upload.pdf"
-            upload_content = content
-            mime_type = "application/pdf"
-        if lower_name.endswith((".jpg", ".jpeg", ".png")):
-            upload_name = "enhanced.png"
-            upload_content = compress_for_ocr_space(content)
-            mime_type = "image/png"
-        else:
-            upload_name = "compressed.jpg"
-            upload_content = compress_for_ocr_space(content)
-            mime_type = "image/jpeg"
-
-        if len(upload_content) > 1024 * 1024:
-            print("Skipping OCR.space: compressed file still too large")
-            return None
-
-        response = requests.post(
-            "https://api.ocr.space/parse/image",
-            files={
-                "file": (
-                    upload_name,
-                    upload_content,
-                    mime_type,
-                )
-            },
-            data={
-                "apikey": api_key,
-                "language": "eng",
-                "OCREngine": "2",
-                "isOverlayRequired": "false",
-                "scale": "true",
-                "detectOrientation": "true",
-                "isTable": "true",
-            },
-            timeout=120,
-        )
-
-        result = response.json()
-
-        if result.get("IsErroredOnProcessing"):
-            print("OCR.space error:", result.get("ErrorMessage"))
-            return None
-
-        parsed = result.get("ParsedResults") or []
-        text = "\n".join(
-            item.get("ParsedText", "").strip()
-            for item in parsed
-            if item.get("ParsedText")
-        ).strip()
-
-        print("OCR.space text found:", bool(text))
-        if text:
-            print("OCR.space preview:", text[:200])
-
-        return text or None
-
-    except Exception as e:
-        print("OCR.space exception:", repr(e))
-        return None
-    
 class CorrectionPayload(BaseModel):
     userId: str
     wrong: str
@@ -155,47 +23,6 @@ class CorrectionPayload(BaseModel):
 
 
 _CORRECTIONS: dict[str, dict[str, str]] = {}
-
-NOTE_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "title": {"type": "string"},
-        "rawText": {"type": "string"},
-        "tags": {"type": "array", "items": {"type": "string"}},
-        "confidence": {"type": "number"},
-        "blocks": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": [
-                            "title",
-                            "heading",
-                            "subheading",
-                            "paragraph",
-                            "bullet",
-                            "definition",
-                            "question",
-                            "answer",
-                            "table",
-                            "code",
-                            "formula",
-                        ],
-                    },
-                    "content": {"type": "string"},
-                    "confidence": {"type": "number"},
-                    "page": {"type": "number"},
-                },
-                "required": ["type", "content", "confidence", "page"],
-            },
-        },
-    },
-    "required": ["title", "rawText", "tags", "confidence", "blocks"],
-}
 
 
 @lru_cache(maxsize=1)
@@ -205,8 +32,21 @@ def get_rapid_ocr():
     return RapidOCR()
 
 
-def prepare_image(content: bytes):
-    return prepare_image_variants(content)[0][1]
+@lru_cache(maxsize=1)
+def get_trocr_model():
+    try:
+        import torch
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+    except Exception as exc:
+        raise RuntimeError("TrOCR dependencies are not installed. Install ai-service/requirements-vision.txt.") from exc
+
+    model_name = os.getenv("TROCR_MODEL", "microsoft/trocr-base-handwritten")
+    processor = TrOCRProcessor.from_pretrained(model_name)
+    model = VisionEncoderDecoderModel.from_pretrained(model_name)
+    device = "cuda" if torch.cuda.is_available() and os.getenv("TROCR_DEVICE", "auto") != "cpu" else "cpu"
+    model.to(device)
+    model.eval()
+    return processor, model, device
 
 
 def pil_from_cv2(gray):
@@ -247,15 +87,11 @@ def deskew_image(gray):
     if coords.size == 0:
         return gray
     angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45:
-        angle = -(90 + angle)
-    else:
-        angle = -angle
+    angle = -(90 + angle) if angle < -45 else -angle
     if abs(angle) < 0.35 or abs(angle) > 15:
         return gray
     height, width = gray.shape[:2]
-    center = (width // 2, height // 2)
-    matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    matrix = cv2.getRotationMatrix2D((width // 2, height // 2), angle, 1.0)
     return cv2.warpAffine(gray, matrix, (width, height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
@@ -288,14 +124,12 @@ def prepare_image_variants(content: bytes):
     adaptive = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 11)
     otsu = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     sharp = ImageOps.autocontrast(pil_from_cv2(denoised)).filter(ImageFilter.SHARPEN)
-
-    variants = [
-        ("enhanced", sharp),
-        ("adaptive", pil_from_cv2(adaptive)),
-        ("otsu", pil_from_cv2(otsu)),
-        ("gray", ImageOps.autocontrast(pil_from_cv2(gray)).filter(ImageFilter.SHARPEN)),
+    return [
+        ("enhanced", sharp.convert("RGB")),
+        ("adaptive", pil_from_cv2(adaptive).convert("RGB")),
+        ("otsu", pil_from_cv2(otsu).convert("RGB")),
+        ("gray", ImageOps.autocontrast(pil_from_cv2(gray)).filter(ImageFilter.SHARPEN).convert("RGB")),
     ]
-    return variants
 
 
 def text_score(text: str) -> float:
@@ -326,12 +160,56 @@ def run_rapidocr(image) -> str:
 
         result, _elapsed = get_rapid_ocr()(np.array(image.convert("RGB")))
         lines = [item[1].strip() for item in result or [] if len(item) > 1 and item[1].strip()]
-        if lines:
-            return "\n".join(lines)
+        return "\n".join(lines)
     except Exception:
-        pass
+        return ""
 
-    return ""
+
+def segment_text_lines(image):
+    import cv2
+    import numpy as np
+
+    gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(20, gray.shape[1] // 35), 5))
+    dilated = cv2.dilate(thresh, kernel, iterations=1)
+    contours, _hierarchy = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    boxes = []
+    height, width = gray.shape[:2]
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < width * 0.08 or h < 12:
+            continue
+        pad = max(8, h // 3)
+        boxes.append((max(0, x - pad), max(0, y - pad), min(width, x + w + pad), min(height, y + h + pad)))
+
+    boxes.sort(key=lambda box: (box[1], box[0]))
+    return [image.crop(box) for box in boxes[: int(os.getenv("TROCR_MAX_LINES", "80"))]]
+
+
+def run_trocr(content: bytes) -> str:
+    if os.getenv("ENABLE_TROCR", "false").lower() != "true":
+        return ""
+
+    try:
+        import torch
+
+        processor, model, device = get_trocr_model()
+        image = prepare_image_variants(content)[0][1]
+        line_images = segment_text_lines(image) or [image]
+        lines = []
+        for line_image in line_images:
+            pixel_values = processor(images=line_image, return_tensors="pt").pixel_values.to(device)
+            with torch.no_grad():
+                generated_ids = model.generate(pixel_values, max_length=96)
+            text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            if text:
+                lines.append(text)
+        return "\n".join(lines).strip()
+    except Exception as exc:
+        print("TrOCR unavailable or failed:", repr(exc))
+        return ""
 
 
 def ocr_image(image) -> str:
@@ -345,14 +223,13 @@ def ocr_image(image) -> str:
     if rapid_text:
         candidates.append(rapid_text)
 
-    if not candidates:
-        return ""
-
-    return max(candidates, key=text_score).strip()
+    return max(candidates, key=text_score).strip() if candidates else ""
 
 
 def ocr_image_variants(content: bytes) -> tuple[str, str]:
-    candidates = []
+    trocr_text = run_trocr(content)
+    candidates = [(text_score(trocr_text) + 120, "trocr", trocr_text)] if trocr_text else []
+
     for name, image in prepare_image_variants(content):
         text = ocr_image(image)
         if text:
@@ -375,7 +252,6 @@ def image_quality_report(content: bytes) -> dict:
     brightness = float(np.mean(gray))
     contrast = float(np.std(gray))
     blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-
     dark_pixels = float(np.mean(gray < 120))
     suggestions = []
     if max(width, height) < 1400:
@@ -387,8 +263,7 @@ def image_quality_report(content: bytes) -> dict:
     if brightness < 95:
         suggestions.append("The page is dark. Add light before scanning.")
     if dark_pixels < 0.015:
-        suggestions.append("Text looks very small or faint. Crop closer to the page.")
-
+        suggestions.append("Text looks small or faint. Crop closer to the writing.")
     return {
         "width": width,
         "height": height,
@@ -399,36 +274,63 @@ def image_quality_report(content: bytes) -> dict:
         "suggestions": suggestions or ["Scan quality looks usable."],
     }
 
+
 def compress_for_ocr_space(content: bytes) -> bytes:
     from PIL import Image
 
     image = Image.open(io.BytesIO(content)).convert("RGB")
     max_side = 1400
-
     if max(image.size) > max_side:
         ratio = max_side / max(image.size)
         image = image.resize((int(image.width * ratio), int(image.height * ratio)))
 
-    quality = 80
-    while quality >= 35:
-        output = io.BytesIO()
-        image.save(output, format="JPEG", quality=quality, optimize=True)
-        data = output.getvalue()
-        if len(data) <= 950 * 1024:
-            return data
-        quality -= 10
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=78, optimize=True)
+    return output.getvalue()
 
-    return data
 
-def ocr_pdf_pages(document: fitz.Document) -> str:
-    page_text = []
-    for page in document:
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
-        image_bytes = pixmap.tobytes("png")
-        text, _variant = ocr_image_variants(image_bytes)
-        if text:
-            page_text.append(text)
-    return "\n".join(page_text).strip()
+def extract_with_ocr_space(filename: str, content: bytes) -> str:
+    api_key = os.getenv("OCR_SPACE_API_KEY", "").strip()
+    if not api_key:
+        return ""
+    lower_name = filename.lower()
+    upload_name = filename if lower_name.endswith(".pdf") else "enhanced.jpg"
+    upload_content = content if lower_name.endswith(".pdf") else compress_for_ocr_space(content)
+    mime_type = "application/pdf" if lower_name.endswith(".pdf") else "image/jpeg"
+    boundary = "----PenBotBoundary"
+    fields = {
+        "apikey": api_key,
+        "language": "eng",
+        "OCREngine": "2",
+        "isOverlayRequired": "false",
+        "scale": "true",
+        "detectOrientation": "true",
+    }
+    body = bytearray()
+    for key, value in fields.items():
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode())
+    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{urllib.parse.quote(upload_name)}\"\r\nContent-Type: {mime_type}\r\n\r\n".encode())
+    body.extend(upload_content)
+    body.extend(f"\r\n--{boundary}--\r\n".encode())
+
+    try:
+        request = urllib.request.Request(
+            "https://api.ocr.space/parse/image",
+            data=bytes(body),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=120) as response:
+            import json
+
+            result = json.loads(response.read().decode("utf-8"))
+        if result.get("IsErroredOnProcessing"):
+            return ""
+        parsed = result.get("ParsedResults") or []
+        return "\n".join(item.get("ParsedText", "").strip() for item in parsed if item.get("ParsedText")).strip()
+    except Exception as exc:
+        print("OCR.space failed:", repr(exc))
+        return ""
 
 
 def extract_pdf_page_texts(document: fitz.Document) -> list[str]:
@@ -443,67 +345,56 @@ def extract_pdf_page_texts(document: fitz.Document) -> list[str]:
     return pages
 
 
-def image_data_url(mime_type: str, content: bytes) -> str:
-    encoded = base64.b64encode(content).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
+def build_page_blocks(text: str, page_number: int) -> list[dict[str, Any]]:
+    text = str(text or "").strip()
+    if not text:
+        return [{"type": "paragraph", "content": "No readable text was found.", "confidence": 0.1, "page": page_number}]
 
-
-def upload_to_vision_images(filename: str, content: bytes) -> list[dict[str, str]]:
-    lower_name = filename.lower()
-    if lower_name.endswith(".pdf"):
-        max_pages = int(os.getenv("OPENAI_MAX_PDF_PAGES", "3"))
-        images = []
-        with fitz.open(stream=content, filetype="pdf") as document:
-            for page_index, page in enumerate(document):
-                if page_index >= max_pages:
-                    break
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                images.append({"type": "input_image", "image_url": image_data_url("image/png", pixmap.tobytes("png"))})
-        return images
-
-    mime_type = "image/png"
-    if lower_name.endswith((".jpg", ".jpeg")):
-        mime_type = "image/jpeg"
-    return [{"type": "input_image", "image_url": image_data_url(mime_type, content)}]
-
-
-def extract_response_text(response_json: dict) -> str:
-    if isinstance(response_json.get("output_text"), str):
-        return response_json["output_text"]
-
-    fragments = []
-    for output in response_json.get("output", []):
-        for content in output.get("content", []):
-            text = content.get("text") or content.get("output_text")
-            if text:
-                fragments.append(text)
-    return "\n".join(fragments)
-
-
-def normalize_structured_note(note: dict) -> dict:
-    blocks = note.get("blocks") or []
-    title = (note.get("title") or "").strip()
-    if title and not any(block.get("type") == "title" for block in blocks):
-        blocks.insert(0, {"type": "title", "content": title, "confidence": note.get("confidence", 0.9)})
-
-    cleaned_blocks = []
-    for block in blocks:
-        block_type = block.get("type", "paragraph")
+    cleaned = []
+    for block in build_blocks(text):
         content = str(block.get("content", "")).strip()
         if not content:
             continue
-        cleaned_blocks.append(
+        block_type = block.get("type", "paragraph")
+        cleaned.append(
             {
                 "type": block_type,
                 "content": to_latex(content) if block_type == "formula" else content,
-                "confidence": float(block.get("confidence", note.get("confidence", 0.9)) or 0.9),
-                **({"page": int(block["page"])} if block.get("page") else {}),
+                "confidence": float(block.get("confidence", 0.85) or 0.85),
+                "page": page_number,
             }
         )
+    return cleaned or [{"type": "paragraph", "content": text, "confidence": 0.5, "page": page_number}]
 
-    raw_text = note.get("rawText") or "\n".join(block["content"] for block in cleaned_blocks)
-    tags = [str(tag).upper() for tag in note.get("tags", []) if str(tag).strip()] or detect_tags(raw_text)
-    return {"rawText": raw_text, "blocks": cleaned_blocks, "tags": tags}
+
+def extract_local_document(filename: str, content: bytes) -> dict[str, Any]:
+    lower_name = filename.lower()
+    if lower_name.endswith(".pdf"):
+        try:
+            with fitz.open(stream=content, filetype="pdf") as document:
+                page_texts = extract_pdf_page_texts(document)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Could not read the uploaded PDF") from exc
+
+        readable_pages = [(index + 1, text) for index, text in enumerate(page_texts) if str(text).strip()]
+        if not readable_pages:
+            fallback_text = "No readable text was found. Please retry with a clearer scan."
+            return {"text": fallback_text, "blocks": build_page_blocks(fallback_text, 1)}
+
+        blocks: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        for page_number, page_text in readable_pages:
+            corrected_page = str(page_text).strip()
+            text_parts.append(f"Page {page_number}\n{corrected_page}")
+            blocks.extend(build_page_blocks(corrected_page, page_number))
+        return {"text": "\n\n".join(text_parts), "blocks": blocks}
+
+    text, _variant = ocr_image_variants(content)
+    if not text.strip():
+        text = extract_with_ocr_space(filename, content)
+    if not text.strip():
+        text = "No readable text was found. Please retry with a clearer image."
+    return {"text": text, "blocks": build_page_blocks(text, 1)}
 
 
 def apply_corrections_to_blocks(user_id: str, blocks: list[dict], corrections: dict[str, dict[str, str]]) -> list[dict]:
@@ -515,236 +406,22 @@ def apply_corrections_to_blocks(user_id: str, blocks: list[dict], corrections: d
     return corrected_blocks
 
 
-def extract_with_openai_vision(filename: str, content: bytes) -> dict | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
-    image_inputs = upload_to_vision_images(filename, content)
-    if not image_inputs:
-        return None
-
-    prompt = (
-        "You are PenBot AI, a handwritten notes recognition and converter. "
-        "Read the uploaded page image(s), correct obvious OCR mistakes, preserve formulas, and return organized study notes. "
-        "Create semantic blocks: title, heading, subheading, paragraph, bullet, definition, question, answer, formula, code, or table. "
-        "Set page to the 1-based source page number for every block. "
-        "Prefer useful section headings and bullets when the page is visually organized. "
-        "Do not invent content that is not present."
-    )
-    payload = {
-        "model": os.getenv("OPENAI_VISION_MODEL", "gpt-5.4-mini"),
-        "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": prompt}]},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Convert these handwritten notes into structured JSON study notes."},
-                    *image_inputs,
-                ],
-            },
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "penbot_structured_notes",
-                "strict": True,
-                "schema": NOTE_SCHEMA,
-            }
-        },
-        "max_output_tokens": 4000,
-    }
-
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            response_json = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        print("OpenAI HTTP error:", e.code, e.read().decode("utf-8"))
-        return None
-    except Exception as e:
-        print("OpenAI Vision error:", repr(e))
-        return None
-
-    text = extract_response_text(response_json)
-    if not text:
-        return None
-
-    try:
-        return normalize_structured_note(json.loads(text))
-    except json.JSONDecodeError:
-        return None
-
-def extract_text(filename: str, content: bytes) -> str:
+@router.post("/process")
+async def process_ocr(noteId: str = Form(...), userId: str = Form(...), file: UploadFile = File(...)):
+    content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    lower_name = filename.lower()
-
-    if lower_name.endswith(".pdf"):
-        try:
-            with fitz.open(stream=content, filetype="pdf") as document:
-                text = "\n".join(page.get_text("text").strip() for page in document)
-
-                if text.strip():
-                    return text.strip()
-
-                scanned_text = ocr_pdf_pages(document)
-                if scanned_text.strip():
-                    return scanned_text.strip()
-
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="Could not read the uploaded PDF") from exc
-
-    text, _variant = ocr_image_variants(content)
-
-    if text.strip():
-        return text.strip()
-
-    return "No readable text was found. Please retry with a clearer image."    
-
-
-def build_page_blocks(text: str, page_number: int) -> list[dict]:
-    text = str(text or "").strip()
-
-    if not text:
-        return [{
-            "type": "paragraph",
-            "content": "No readable text was found.",
-            "confidence": 0.1,
-            "page": page_number,
-        }]
-
-    blocks = build_blocks(text)
-
-    cleaned = []
-    for block in blocks:
-        content = str(block.get("content", "")).strip()
-        if not content:
-            continue
-
-        block_type = block.get("type", "paragraph")
-
-        cleaned.append({
-            "type": block_type,
-            "content": to_latex(content) if block_type == "formula" else content,
-            "confidence": float(block.get("confidence", 0.85) or 0.85),
-            "page": page_number,
-        })
-
-    return cleaned or [{
-        "type": "paragraph",
-        "content": text,
-        "confidence": 0.5,
-        "page": page_number,
-    }]
-
-def extract_local_document(filename: str, content: bytes) -> dict:
-    lower_name = filename.lower()
-
-    if lower_name.endswith(".pdf"):
-        try:
-            with fitz.open(stream=content, filetype="pdf") as document:
-                page_texts = extract_pdf_page_texts(document)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="Could not read the uploaded PDF") from exc
-
-        readable_pages = [(index + 1, text) for index, text in enumerate(page_texts) if str(text).strip()]
-
-        if not readable_pages:
-            fallback_text = "No readable text was found. Please retry with a clearer scan."
-            return {
-                "text": fallback_text,
-                "blocks": build_page_blocks(fallback_text, 1),
-            }
-
-        blocks: list[dict] = []
-        text_parts: list[str] = []
-
-        for page_number, page_text in readable_pages:
-            corrected_page = str(page_text).strip()
-            text_parts.append(f"Page {page_number}\n{corrected_page}")
-            blocks.extend(build_page_blocks(corrected_page, page_number))
-
-        raw_text = "\n\n".join(text_parts)
-
-        return {
-            "text": raw_text,
-            "blocks": blocks,
-        }
-
-    text = extract_text(filename, content)
-
-    return {
-        "text": text,
-        "blocks": build_page_blocks(text, 1),
-    }
-
-@router.post("/process")
-async def process_ocr(
-    noteId: str = Form(...),
-    userId: str = Form(...),
-    file: UploadFile = File(...)
-):
-    content = await file.read()
     filename = file.filename or "upload"
-
-    # 1. OpenAI Vision
-    vision_note = extract_with_openai_vision(filename, content)
-
-    if vision_note:
-        corrected_text = apply_user_corrections(userId, vision_note["rawText"], _CORRECTIONS)
-        corrected_blocks = apply_corrections_to_blocks(userId, vision_note["blocks"], _CORRECTIONS)
-
-        return {
-            "noteId": noteId,
-            "extractedText": corrected_text,
-            "structuredBlocks": corrected_blocks,
-            "tags": vision_note["tags"],
-        }
-    # 2. Google Vision fallback
-    google_text = extract_with_google_vision(filename, content)
-
-    if google_text:
-        corrected_text = apply_user_corrections(userId, google_text, _CORRECTIONS)
-        blocks = build_page_blocks(corrected_text, 1)
-
-        return {
-            "noteId": noteId,
-            "extractedText": corrected_text,
-            "structuredBlocks": blocks,
-            "tags": detect_tags(corrected_text),
-        }
-    # 3. OCR.space fallback
-    ocr_space_text = extract_with_ocr_space(filename, content)
-
-    if ocr_space_text:
-        corrected_text = apply_user_corrections(userId, ocr_space_text, _CORRECTIONS)
-        blocks = build_page_blocks(corrected_text, 1)
-
-        return {
-            "noteId": noteId,
-            "extractedText": corrected_text,
-            "structuredBlocks": blocks,
-            "tags": detect_tags(corrected_text),
-        }
-
-    # 4. Local OCR fallback
     local_note = extract_local_document(filename, content)
     corrected_text = apply_user_corrections(userId, local_note["text"], _CORRECTIONS)
     blocks = apply_corrections_to_blocks(userId, local_note["blocks"], _CORRECTIONS)
-
     return {
         "noteId": noteId,
         "extractedText": corrected_text,
         "structuredBlocks": blocks,
         "tags": detect_tags(corrected_text),
+        "engine": "trocr" if os.getenv("ENABLE_TROCR", "false").lower() == "true" else "local",
     }
 
 

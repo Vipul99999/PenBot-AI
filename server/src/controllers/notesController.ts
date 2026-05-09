@@ -9,11 +9,12 @@ import { deleteStoredFile, openStoredFileStream, saveUpload } from '../services/
 
 const correctionSchema = z.object({ wrong: z.string().min(1), corrected: z.string().min(1) });
 const updateNoteSchema = z.object({
+  title: z.string().min(1).max(120).optional(),
   extractedText: z.string().optional(),
   structuredBlocks: z
     .array(
       z.object({
-        type: z.enum(['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'table', 'code', 'formula']),
+        type: z.enum(['title', 'heading', 'subheading', 'paragraph', 'bullet', 'numbered', 'step', 'definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer', 'table', 'code', 'formula']),
         content: z.string(),
         confidence: z.number().min(0).max(1).optional(),
         page: z.number().int().min(1).optional()
@@ -36,6 +37,7 @@ export async function uploadNote(req: AuthRequest, res: Response) {
   const storedFile = await saveUpload(req.file);
   const note = await Note.create({
     userId: req.userId,
+    title: path.parse(storedFile.filename).name || 'Untitled note',
     fileId: storedFile.fileId,
     originalFilename: storedFile.filename,
     originalMimeType: storedFile.mimetype,

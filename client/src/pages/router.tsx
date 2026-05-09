@@ -10,6 +10,8 @@ import { EditorPage } from './EditorPage';
 import { SearchPage } from './SearchPage';
 import { LoginPage } from './LoginPage';
 import { RegisterPage } from './RegisterPage';
+import { ForgotPasswordPage } from './ForgotPasswordPage';
+import { ResetPasswordPage } from './ResetPasswordPage';
 
 function Home() {
   const token = useAuthStore((s) => s.token);
@@ -125,6 +127,8 @@ export function AppRouter() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<Layout />}>
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/dashboard/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />

@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
   Brain,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Download,
   FileDown,
   Filter,
@@ -16,12 +18,13 @@ import {
   RotateCcw,
   Save,
   Sparkles,
+  Trash,
   Trash2
 } from 'lucide-react';
 import { notesApi } from '@/api/notes';
 import { http } from '@/api/http';
 
-const blockTypes = ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'formula', 'code'] as const;
+const blockTypes = ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'numbered', 'step', 'definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer', 'table', 'formula', 'code'] as const;
 type BlockType = typeof blockTypes[number];
 type EditableBlock = {
   localId: string;
@@ -167,6 +170,18 @@ function pagesFromBlocks(blocks: EditableBlock[]) {
   return pages.length ? pages.sort((a, b) => a - b) : [1];
 }
 
+function parseTable(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .map((row) => {
+      const delimiter = row.includes('|') || row.includes('\t') || /\s{2,}/.test(row) ? /\s*\|\s*|\t|\s{2,}/ : /\s+/;
+      return row.split(delimiter).map((cell) => cell.trim()).filter(Boolean);
+    })
+    .filter((row) => row.length > 1);
+}
+
 function OriginalPreview({ blob, page, compact = false }: { blob?: Blob; page: number; compact?: boolean }) {
   const [url, setUrl] = useState('');
 
@@ -203,26 +218,66 @@ function OriginalPreview({ blob, page, compact = false }: { blob?: Blob; page: n
   );
 }
 
-function PagePreview({ blocks, page }: { blocks: EditableBlock[]; page: number }) {
+function PagePreview({ blocks, page, title }: { blocks: EditableBlock[]; page: number; title: string }) {
   const pageBlocks = blocks.filter((block) => block.page === page);
+  const hasTitle = pageBlocks.some((block) => block.type === 'title');
+  let orderedIndex = 0;
+  let stepIndex = 0;
   return (
-    <article className="note-page overflow-hidden">
-      <div className="border-b border-ink/15 bg-mist px-5 py-4">
-        <p className="text-sm font-black uppercase text-brand">Digital page {page}</p>
-        <p className="text-sm font-bold text-ink">Clean notebook preview from edited blocks</p>
+    <article className="a4-page">
+      <div className="a4-header">
+        <div>
+          <p className="text-[10px] font-black uppercase text-brand">PenBot AI converted document</p>
+          <p className="mt-1 max-w-[28rem] truncate text-sm font-black text-ink">{title || 'Untitled note'}</p>
+        </div>
+        <span className="rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand">Page {page}</span>
       </div>
-      <div className="space-y-4 p-5 sm:p-7">
-        {!pageBlocks.length && <p className="font-bold text-ink">No blocks on this page.</p>}
+      <div className="a4-body">
+        {!hasTitle && page === 1 && <h1 className="doc-title">{title || 'Untitled note'}</h1>}
+        {!pageBlocks.length && <p className="doc-paragraph">No converted blocks on this page yet.</p>}
         {pageBlocks.map((block) => {
-          if (block.type === 'title') return <h3 key={block.localId} className="break-words rounded-xl border border-ink/15 bg-white p-4 text-2xl font-black text-ink shadow-sm sm:p-5 sm:text-3xl">{block.content}</h3>;
-          if (block.type === 'heading' || block.type === 'subheading') return <h4 key={block.localId} className="break-words border-l-4 border-brand pl-3 text-lg font-black text-ink sm:text-xl">{block.content}</h4>;
-          if (block.type === 'bullet') return <div key={block.localId} className="note-bullet"><span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-brand" /><p>{block.content}</p></div>;
-          if (block.type === 'definition') return <div key={block.localId} className="note-definition"><p className="text-xs font-black uppercase text-brand">Definition</p><p className="mt-2 font-semibold leading-7 text-ink">{block.content}</p></div>;
-          if (block.type === 'question' || block.type === 'answer') return <div key={block.localId} className={block.type === 'question' ? 'note-question' : 'note-answer'}><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand text-xs font-black text-white">{block.type === 'question' ? 'Q' : 'A'}</span><p>{block.content}</p></div>;
-          if (block.type === 'formula') return <div key={block.localId} className="note-formula"><p className="text-xs font-black uppercase text-brand">Formula</p><p className="mt-2 font-mono text-xl font-black text-ink">{block.content}</p></div>;
-          if (block.type === 'code') return <pre key={block.localId} className="overflow-auto rounded-lg bg-ink p-4 text-sm font-semibold text-white">{block.content}</pre>;
-          return <p key={block.localId} className="note-paragraph">{block.content}</p>;
+          if (block.type === 'title') return <h1 key={block.localId} className="doc-title">{block.content}</h1>;
+          if (block.type === 'heading') return <h2 key={block.localId} className="doc-heading">{block.content}</h2>;
+          if (block.type === 'subheading') return <h3 key={block.localId} className="doc-subheading">{block.content}</h3>;
+          if (block.type === 'bullet') return <div key={block.localId} className="doc-bullet"><span /> <p>{block.content}</p></div>;
+          if (block.type === 'numbered') return <div key={block.localId} className="doc-numbered"><span>{++orderedIndex}</span><p>{block.content}</p></div>;
+          if (block.type === 'step') return <div key={block.localId} className="doc-step"><span>Step {++stepIndex}</span><p>{block.content}</p></div>;
+          if (block.type === 'definition') return <div key={block.localId} className="doc-callout"><p>Definition</p><div>{block.content}</div></div>;
+          if (block.type === 'theorem') return <div key={block.localId} className="doc-callout doc-theorem"><p>Theorem / Rule</p><div>{block.content}</div></div>;
+          if (block.type === 'important') return <div key={block.localId} className="doc-callout doc-important"><p>Important</p><div>{block.content}</div></div>;
+          if (block.type === 'example') return <div key={block.localId} className="doc-callout doc-example"><p>Example</p><div>{block.content}</div></div>;
+          if (block.type === 'objective') return <div key={block.localId} className="doc-callout doc-objective"><p>Objective</p><div>{block.content}</div></div>;
+          if (block.type === 'materials') return <div key={block.localId} className="doc-callout doc-materials"><p>Materials / Apparatus</p><div>{block.content}</div></div>;
+          if (block.type === 'observation') return <div key={block.localId} className="doc-callout doc-observation"><p>Observation</p><div>{block.content}</div></div>;
+          if (block.type === 'result') return <div key={block.localId} className="doc-callout doc-result"><p>Result</p><div>{block.content}</div></div>;
+          if (block.type === 'conclusion') return <div key={block.localId} className="doc-callout doc-conclusion"><p>Conclusion</p><div>{block.content}</div></div>;
+          if (block.type === 'exam_tip') return <div key={block.localId} className="doc-callout doc-exam-tip"><p>Exam tip</p><div>{block.content}</div></div>;
+          if (block.type === 'question' || block.type === 'answer') return <div key={block.localId} className={block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer'}><span>{block.type === 'question' ? 'Q' : 'A'}</span><p>{block.content}</p></div>;
+          if (block.type === 'table') {
+            const rows = parseTable(block.content);
+            return (
+              <div key={block.localId} className="doc-table-wrap">
+                <p>Table</p>
+                <table className="doc-table">
+                  <tbody>
+                    {rows.map((row, rowIndex) => (
+                      <tr key={`${block.localId}-${rowIndex}`}>
+                        {row.map((cell, cellIndex) => rowIndex === 0 ? <th key={cellIndex}>{cell}</th> : <td key={cellIndex}>{cell}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+          if (block.type === 'formula') return <div key={block.localId} className="doc-formula"><p>Formula</p><div>{block.content}</div></div>;
+          if (block.type === 'code') return <pre key={block.localId} className="doc-code">{block.content}</pre>;
+          return <p key={block.localId} className="doc-paragraph">{block.content}</p>;
         })}
+      </div>
+      <div className="a4-footer">
+        <span>Edited and exported with PenBot AI</span>
+        <span>{new Date().toLocaleDateString()}</span>
       </div>
     </article>
   );
@@ -290,8 +345,10 @@ function BlockEditor({
 
 export function EditorPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
+  const [title, setTitle] = useState('Untitled note');
   const [activePage, setActivePage] = useState(1);
   const [reviewOnly, setReviewOnly] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('edit');
@@ -300,7 +357,7 @@ export function EditorPage() {
   const [wrong, setWrong] = useState('');
   const [corrected, setCorrected] = useState('');
   const [message, setMessage] = useState('');
-const [showEdit, setShowEdit] = useState(false);
+  const [showEdit, setShowEdit] = useState(true);
   const noteQuery = useQuery({
     queryKey: ['note', id],
     queryFn: () => notesApi.get(id).then((r) => r.data),
@@ -322,6 +379,7 @@ const [showEdit, setShowEdit] = useState(false);
   useEffect(() => {
     if (!data || dirty) return;
     const nextBlocks = blocksFromNote(data);
+    setTitle(data.title || nextBlocks.find((block) => block.type === 'title')?.content || 'Untitled note');
     setBlocks(nextBlocks);
     setActivePage(pagesFromBlocks(nextBlocks)[0] || 1);
   }, [data, dirty]);
@@ -339,7 +397,7 @@ const [showEdit, setShowEdit] = useState(false);
   const saveBlocks = useMutation({
     mutationFn: () => {
       const cleaned = cleanBlocksForSave(blocks);
-      return notesApi.update(id, { structuredBlocks: cleaned, extractedText: blocksToPlainText(blocks) });
+      return notesApi.update(id, { title: title.trim() || 'Untitled note', structuredBlocks: cleaned, extractedText: blocksToPlainText(blocks) });
     },
     onSuccess: () => {
       setDirty(false);
@@ -354,7 +412,7 @@ const [showEdit, setShowEdit] = useState(false);
     if (!dirty || isBusy || saveBlocks.isPending) return undefined;
     const timer = window.setTimeout(() => saveBlocks.mutate(), 3500);
     return () => window.clearTimeout(timer);
-  }, [dirty, blocks, isBusy, saveBlocks.isPending]);
+  }, [dirty, blocks, title, isBusy, saveBlocks.isPending]);
 
   const summarize = useMutation({ mutationFn: () => notesApi.summary(id) });
   const flashcards = useMutation({ mutationFn: () => notesApi.flashcards(id) });
@@ -377,6 +435,19 @@ const [showEdit, setShowEdit] = useState(false);
       setMessage('OCR retry queued.');
     }
   });
+  const deleteNote = useMutation({
+    mutationFn: () => notesApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+      navigate('/dashboard');
+    }
+  });
+
+  function requestDelete() {
+    if (window.confirm('Delete this note and its original upload? This cannot be undone.')) {
+      deleteNote.mutate();
+    }
+  }
 
   function updateBlock(id: string, patch: Partial<EditableBlock>) {
     setBlocks((current) => current.map((block) => block.localId === id ? { ...block, ...patch } : block));
@@ -422,7 +493,15 @@ const [showEdit, setShowEdit] = useState(false);
             <ArrowLeft size={16} />
             Back
           </Link>
-          <h2 className="mt-2 text-2xl font-black text-ink sm:text-3xl">Page editor</h2>
+          <input
+            className="mt-2 w-full rounded-md border border-transparent bg-transparent px-0 text-2xl font-black text-ink outline-none transition focus:border-brand/30 focus:bg-white focus:px-3 sm:text-3xl"
+            value={title}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              setDirty(true);
+            }}
+            aria-label="Note title"
+          />
           <p className="mt-1 text-sm font-bold text-ink">
             Status: {data.status}{isBusy ? ' - OCR is still running.' : ''}
             {dirty ? ' - unsaved changes' : lastSavedAt ? ` - saved ${lastSavedAt.toLocaleTimeString()}` : ''}
@@ -442,6 +521,10 @@ const [showEdit, setShowEdit] = useState(false);
           <button onClick={() => noteQuery.refetch()} disabled={noteQuery.isFetching} className="secondary-button">
             <RefreshCw size={18} className={noteQuery.isFetching ? 'animate-spin' : ''} />
             {noteQuery.isFetching ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button onClick={requestDelete} disabled={deleteNote.isPending} className="secondary-button text-coral">
+            <Trash size={18} />
+            {deleteNote.isPending ? 'Deleting...' : 'Delete'}
           </button>
         </div>
       </div>
@@ -481,7 +564,7 @@ const [showEdit, setShowEdit] = useState(false);
         ))}
       </div>
 
-      <div className="grid gap-5 2xl:grid-cols-[360px_minmax(420px,0.95fr)_minmax(560px,1.05fr)] xl:grid-cols-[320px_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[300px_minmax(360px,0.9fr)_minmax(460px,1.1fr)]">
         <aside className={`${mobilePanel === 'blocks' ? 'block' : 'hidden'} space-y-4 xl:block`}>
           <ReviewChecklist
             blocks={blocks}
@@ -533,7 +616,7 @@ const [showEdit, setShowEdit] = useState(false);
           </div>
         </aside>
 
-        <aside className="hidden 2xl:block">
+        <aside className="hidden xl:block">
           <OriginalPreview blob={originalQuery.data} page={activePage} />
         </aside>
 
@@ -547,8 +630,8 @@ const [showEdit, setShowEdit] = useState(false);
     onClick={() => setShowEdit((prev) => !prev)}
     className="surface flex w-full items-center justify-between border border-ink/10 px-4 py-3 text-left font-black text-ink"
   >
-    <span>Edit blocks</span>
-    <span className="text-lg">{showEdit ? '▲' : '▼'}</span>
+    <span>Edit converted blocks</span>
+    {showEdit ? <ChevronUp size={18} className="text-brand" /> : <ChevronDown size={18} className="text-brand" />}
   </button>
 
   <div
@@ -567,7 +650,7 @@ const [showEdit, setShowEdit] = useState(false);
   </div>
 </div>
           <div className={`${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`}>
-            <PagePreview blocks={blocks} page={activePage} />
+            <PagePreview blocks={blocks} page={activePage} title={title} />
           </div>
 
           <div className={`${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`}>

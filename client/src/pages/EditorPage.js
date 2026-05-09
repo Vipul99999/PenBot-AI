@@ -1,11 +1,11 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Brain, ChevronLeft, ChevronRight, Download, FileDown, Filter, Image as ImageIcon, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileDown, Filter, Image as ImageIcon, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash, Trash2 } from 'lucide-react';
 import { notesApi } from '@/api/notes';
 import { http } from '@/api/http';
-const blockTypes = ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'definition', 'question', 'answer', 'formula', 'code'];
+const blockTypes = ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'numbered', 'step', 'definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer', 'table', 'formula', 'code'];
 function ReviewChecklist({ blocks, pages, activePage, dirty, isBusy, onGoPage, onReview }) {
     const emptyPages = pages.filter((page) => !blocks.some((block) => block.page === page && block.content.trim()));
     const lowConfidence = blocks.filter((block) => (block.confidence || 0) < 0.8);
@@ -74,6 +74,17 @@ function pagesFromBlocks(blocks) {
     const pages = Array.from(new Set(blocks.map((block) => block.page || 1)));
     return pages.length ? pages.sort((a, b) => a - b) : [1];
 }
+function parseTable(content) {
+    return content
+        .split(/\r?\n/)
+        .map((row) => row.trim())
+        .filter(Boolean)
+        .map((row) => {
+        const delimiter = row.includes('|') || row.includes('\t') || /\s{2,}/.test(row) ? /\s*\|\s*|\t|\s{2,}/ : /\s+/;
+        return row.split(delimiter).map((cell) => cell.trim()).filter(Boolean);
+    })
+        .filter((row) => row.length > 1);
+}
 function OriginalPreview({ blob, page, compact = false }) {
     const [url, setUrl] = useState('');
     useEffect(() => {
@@ -86,25 +97,56 @@ function OriginalPreview({ blob, page, compact = false }) {
     const pdfUrl = url ? `${url}#page=${page}&view=FitH` : '';
     return (_jsxs("div", { className: "surface sticky top-4 overflow-hidden", children: [_jsxs("div", { className: "flex items-center gap-2 border-b border-ink/15 bg-mist px-4 py-3", children: [_jsx(ImageIcon, { className: "text-brand", size: 18 }), _jsxs("div", { children: [_jsx("p", { className: "font-black text-ink", children: "Original upload" }), _jsxs("p", { className: "text-xs font-bold uppercase text-ink/70", children: ["Synced to page ", page] })] })] }), _jsxs("div", { className: `${compact ? 'max-h-[520px]' : 'max-h-[760px]'} overflow-auto bg-ink/5 p-3`, children: [!url && _jsx("p", { className: "rounded-lg bg-white p-4 text-sm font-semibold text-ink", children: "Original preview is loading." }), url && blob?.type === 'application/pdf' && (_jsx("object", { data: pdfUrl, type: "application/pdf", className: `${compact ? 'h-[500px]' : 'h-[720px]'} w-full rounded-lg border border-ink/10 bg-white`, children: _jsx("a", { className: "font-bold text-brand", href: pdfUrl, target: "_blank", rel: "noreferrer", children: "Open original PDF" }) }, pdfUrl)), url && blob?.type !== 'application/pdf' && (_jsx("img", { src: url, alt: "Original uploaded note", className: "mx-auto max-h-[720px] rounded-lg border border-ink/10 bg-white object-contain shadow-sm" }))] })] }));
 }
-function PagePreview({ blocks, page }) {
+function PagePreview({ blocks, page, title }) {
     const pageBlocks = blocks.filter((block) => block.page === page);
-    return (_jsxs("article", { className: "note-page overflow-hidden", children: [_jsxs("div", { className: "border-b border-ink/15 bg-mist px-5 py-4", children: [_jsxs("p", { className: "text-sm font-black uppercase text-brand", children: ["Digital page ", page] }), _jsx("p", { className: "text-sm font-bold text-ink", children: "Clean notebook preview from edited blocks" })] }), _jsxs("div", { className: "space-y-4 p-5 sm:p-7", children: [!pageBlocks.length && _jsx("p", { className: "font-bold text-ink", children: "No blocks on this page." }), pageBlocks.map((block) => {
+    const hasTitle = pageBlocks.some((block) => block.type === 'title');
+    let orderedIndex = 0;
+    let stepIndex = 0;
+    return (_jsxs("article", { className: "a4-page", children: [_jsxs("div", { className: "a4-header", children: [_jsxs("div", { children: [_jsx("p", { className: "text-[10px] font-black uppercase text-brand", children: "PenBot AI converted document" }), _jsx("p", { className: "mt-1 max-w-[28rem] truncate text-sm font-black text-ink", children: title || 'Untitled note' })] }), _jsxs("span", { className: "rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand", children: ["Page ", page] })] }), _jsxs("div", { className: "a4-body", children: [!hasTitle && page === 1 && _jsx("h1", { className: "doc-title", children: title || 'Untitled note' }), !pageBlocks.length && _jsx("p", { className: "doc-paragraph", children: "No converted blocks on this page yet." }), pageBlocks.map((block) => {
                         if (block.type === 'title')
-                            return _jsx("h3", { className: "break-words rounded-xl border border-ink/15 bg-white p-4 text-2xl font-black text-ink shadow-sm sm:p-5 sm:text-3xl", children: block.content }, block.localId);
-                        if (block.type === 'heading' || block.type === 'subheading')
-                            return _jsx("h4", { className: "break-words border-l-4 border-brand pl-3 text-lg font-black text-ink sm:text-xl", children: block.content }, block.localId);
+                            return _jsx("h1", { className: "doc-title", children: block.content }, block.localId);
+                        if (block.type === 'heading')
+                            return _jsx("h2", { className: "doc-heading", children: block.content }, block.localId);
+                        if (block.type === 'subheading')
+                            return _jsx("h3", { className: "doc-subheading", children: block.content }, block.localId);
                         if (block.type === 'bullet')
-                            return _jsxs("div", { className: "note-bullet", children: [_jsx("span", { className: "mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-brand" }), _jsx("p", { children: block.content })] }, block.localId);
+                            return _jsxs("div", { className: "doc-bullet", children: [_jsx("span", {}), " ", _jsx("p", { children: block.content })] }, block.localId);
+                        if (block.type === 'numbered')
+                            return _jsxs("div", { className: "doc-numbered", children: [_jsx("span", { children: ++orderedIndex }), _jsx("p", { children: block.content })] }, block.localId);
+                        if (block.type === 'step')
+                            return _jsxs("div", { className: "doc-step", children: [_jsxs("span", { children: ["Step ", ++stepIndex] }), _jsx("p", { children: block.content })] }, block.localId);
                         if (block.type === 'definition')
-                            return _jsxs("div", { className: "note-definition", children: [_jsx("p", { className: "text-xs font-black uppercase text-brand", children: "Definition" }), _jsx("p", { className: "mt-2 font-semibold leading-7 text-ink", children: block.content })] }, block.localId);
+                            return _jsxs("div", { className: "doc-callout", children: [_jsx("p", { children: "Definition" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'theorem')
+                            return _jsxs("div", { className: "doc-callout doc-theorem", children: [_jsx("p", { children: "Theorem / Rule" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'important')
+                            return _jsxs("div", { className: "doc-callout doc-important", children: [_jsx("p", { children: "Important" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'example')
+                            return _jsxs("div", { className: "doc-callout doc-example", children: [_jsx("p", { children: "Example" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'objective')
+                            return _jsxs("div", { className: "doc-callout doc-objective", children: [_jsx("p", { children: "Objective" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'materials')
+                            return _jsxs("div", { className: "doc-callout doc-materials", children: [_jsx("p", { children: "Materials / Apparatus" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'observation')
+                            return _jsxs("div", { className: "doc-callout doc-observation", children: [_jsx("p", { children: "Observation" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'result')
+                            return _jsxs("div", { className: "doc-callout doc-result", children: [_jsx("p", { children: "Result" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'conclusion')
+                            return _jsxs("div", { className: "doc-callout doc-conclusion", children: [_jsx("p", { children: "Conclusion" }), _jsx("div", { children: block.content })] }, block.localId);
+                        if (block.type === 'exam_tip')
+                            return _jsxs("div", { className: "doc-callout doc-exam-tip", children: [_jsx("p", { children: "Exam tip" }), _jsx("div", { children: block.content })] }, block.localId);
                         if (block.type === 'question' || block.type === 'answer')
-                            return _jsxs("div", { className: block.type === 'question' ? 'note-question' : 'note-answer', children: [_jsx("span", { className: "grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand text-xs font-black text-white", children: block.type === 'question' ? 'Q' : 'A' }), _jsx("p", { children: block.content })] }, block.localId);
+                            return _jsxs("div", { className: block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer', children: [_jsx("span", { children: block.type === 'question' ? 'Q' : 'A' }), _jsx("p", { children: block.content })] }, block.localId);
+                        if (block.type === 'table') {
+                            const rows = parseTable(block.content);
+                            return (_jsxs("div", { className: "doc-table-wrap", children: [_jsx("p", { children: "Table" }), _jsx("table", { className: "doc-table", children: _jsx("tbody", { children: rows.map((row, rowIndex) => (_jsx("tr", { children: row.map((cell, cellIndex) => rowIndex === 0 ? _jsx("th", { children: cell }, cellIndex) : _jsx("td", { children: cell }, cellIndex)) }, `${block.localId}-${rowIndex}`))) }) })] }, block.localId));
+                        }
                         if (block.type === 'formula')
-                            return _jsxs("div", { className: "note-formula", children: [_jsx("p", { className: "text-xs font-black uppercase text-brand", children: "Formula" }), _jsx("p", { className: "mt-2 font-mono text-xl font-black text-ink", children: block.content })] }, block.localId);
+                            return _jsxs("div", { className: "doc-formula", children: [_jsx("p", { children: "Formula" }), _jsx("div", { children: block.content })] }, block.localId);
                         if (block.type === 'code')
-                            return _jsx("pre", { className: "overflow-auto rounded-lg bg-ink p-4 text-sm font-semibold text-white", children: block.content }, block.localId);
-                        return _jsx("p", { className: "note-paragraph", children: block.content }, block.localId);
-                    })] })] }));
+                            return _jsx("pre", { className: "doc-code", children: block.content }, block.localId);
+                        return _jsx("p", { className: "doc-paragraph", children: block.content }, block.localId);
+                    })] }), _jsxs("div", { className: "a4-footer", children: [_jsx("span", { children: "Edited and exported with PenBot AI" }), _jsx("span", { children: new Date().toLocaleDateString() })] })] }));
 }
 function BlockEditor({ blocks, page, reviewOnly, onChange, onAdd, onDelete }) {
     const pageBlocks = blocks.filter((block) => block.page === page && (!reviewOnly || (block.confidence || 0) < 0.8));
@@ -115,8 +157,10 @@ function BlockEditor({ blocks, page, reviewOnly, onChange, onAdd, onDelete }) {
 }
 export function EditorPage() {
     const { id = '' } = useParams();
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
     const [blocks, setBlocks] = useState([]);
+    const [title, setTitle] = useState('Untitled note');
     const [activePage, setActivePage] = useState(1);
     const [reviewOnly, setReviewOnly] = useState(false);
     const [mobilePanel, setMobilePanel] = useState('edit');
@@ -125,6 +169,7 @@ export function EditorPage() {
     const [wrong, setWrong] = useState('');
     const [corrected, setCorrected] = useState('');
     const [message, setMessage] = useState('');
+    const [showEdit, setShowEdit] = useState(true);
     const noteQuery = useQuery({
         queryKey: ['note', id],
         queryFn: () => notesApi.get(id).then((r) => r.data),
@@ -145,6 +190,7 @@ export function EditorPage() {
         if (!data || dirty)
             return;
         const nextBlocks = blocksFromNote(data);
+        setTitle(data.title || nextBlocks.find((block) => block.type === 'title')?.content || 'Untitled note');
         setBlocks(nextBlocks);
         setActivePage(pagesFromBlocks(nextBlocks)[0] || 1);
     }, [data, dirty]);
@@ -161,7 +207,7 @@ export function EditorPage() {
     const saveBlocks = useMutation({
         mutationFn: () => {
             const cleaned = cleanBlocksForSave(blocks);
-            return notesApi.update(id, { structuredBlocks: cleaned, extractedText: blocksToPlainText(blocks) });
+            return notesApi.update(id, { title: title.trim() || 'Untitled note', structuredBlocks: cleaned, extractedText: blocksToPlainText(blocks) });
         },
         onSuccess: () => {
             setDirty(false);
@@ -176,7 +222,7 @@ export function EditorPage() {
             return undefined;
         const timer = window.setTimeout(() => saveBlocks.mutate(), 3500);
         return () => window.clearTimeout(timer);
-    }, [dirty, blocks, isBusy, saveBlocks.isPending]);
+    }, [dirty, blocks, title, isBusy, saveBlocks.isPending]);
     const summarize = useMutation({ mutationFn: () => notesApi.summary(id) });
     const flashcards = useMutation({ mutationFn: () => notesApi.flashcards(id) });
     const correction = useMutation({
@@ -198,6 +244,18 @@ export function EditorPage() {
             setMessage('OCR retry queued.');
         }
     });
+    const deleteNote = useMutation({
+        mutationFn: () => notesApi.delete(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['notes'] });
+            navigate('/dashboard');
+        }
+    });
+    function requestDelete() {
+        if (window.confirm('Delete this note and its original upload? This cannot be undone.')) {
+            deleteNote.mutate();
+        }
+    }
     function updateBlock(id, patch) {
         setBlocks((current) => current.map((block) => block.localId === id ? { ...block, ...patch } : block));
         setDirty(true);
@@ -233,11 +291,14 @@ export function EditorPage() {
         return _jsx("div", { className: "surface p-6", children: "Loading note..." });
     if (noteQuery.isError || !data)
         return _jsx("div", { className: "surface border-coral/30 bg-coral/10 p-6 font-medium text-coral", children: "Note not found or backend unavailable." });
-    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "surface flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs(Link, { to: "/dashboard", className: "inline-flex items-center gap-2 text-sm font-semibold text-brand", children: [_jsx(ArrowLeft, { size: 16 }), "Back"] }), _jsx("h2", { className: "mt-2 text-2xl font-black text-ink sm:text-3xl", children: "Page editor" }), _jsxs("p", { className: "mt-1 text-sm font-bold text-ink", children: ["Status: ", data.status, isBusy ? ' - OCR is still running.' : '', dirty ? ' - unsaved changes' : lastSavedAt ? ` - saved ${lastSavedAt.toLocaleTimeString()}` : ''] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end", children: [canRetry && (_jsxs("button", { onClick: () => retryOcr.mutate(), disabled: retryOcr.isPending || isBusy, className: "primary-button", children: [_jsx(RotateCcw, { size: 18, className: retryOcr.isPending ? 'animate-spin' : '' }), retryOcr.isPending ? 'Retrying...' : 'Retry OCR'] })), _jsxs("button", { onClick: () => saveBlocks.mutate(), disabled: saveBlocks.isPending || isBusy || !dirty, className: "primary-button", children: [_jsx(Save, { size: 18 }), saveBlocks.isPending ? 'Saving...' : 'Save all pages'] }), _jsxs("button", { onClick: () => noteQuery.refetch(), disabled: noteQuery.isFetching, className: "secondary-button", children: [_jsx(RefreshCw, { size: 18, className: noteQuery.isFetching ? 'animate-spin' : '' }), noteQuery.isFetching ? 'Refreshing...' : 'Refresh'] })] })] }), data.status === 'failed' && (_jsxs("div", { className: "surface border-coral/30 bg-coral/10 p-4", children: [_jsx("p", { className: "font-black text-coral", children: "OCR failed" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink", children: data.ocrError || 'Upload a clearer file, crop the page, improve contrast, or retry conversion.' })] })), _jsxs("div", { className: "surface flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:flex-wrap", children: [_jsxs("button", { className: "secondary-button", onClick: () => goPage(-1), disabled: pages.indexOf(activePage) <= 0, children: [_jsx(ChevronLeft, { size: 18 }), "Prev"] }), _jsx("select", { className: "field min-w-0", value: activePage, onChange: (event) => setActivePage(Number(event.target.value)), children: pages.map((page) => _jsxs("option", { value: page, children: ["Page ", page] }, page)) }), _jsxs("button", { className: "secondary-button", onClick: () => goPage(1), disabled: pages.indexOf(activePage) >= pages.length - 1, children: ["Next", _jsx(ChevronRight, { size: 18 })] })] }), _jsxs("button", { className: reviewOnly ? 'primary-button' : 'secondary-button', onClick: () => setReviewOnly((value) => !value), children: [_jsx(Filter, { size: 18 }), "Needs review ", lowConfidenceCount ? `(${lowConfidenceCount})` : ''] })] }), _jsx("div", { className: "surface grid grid-cols-3 gap-2 p-2 xl:hidden", children: ['blocks', 'original', 'edit'].map((panel) => (_jsx("button", { onClick: () => setMobilePanel(panel), className: mobilePanel === panel ? 'primary-button px-2 text-sm capitalize' : 'secondary-button px-2 text-sm capitalize', children: panel }, panel))) }), _jsxs("div", { className: "grid gap-5 2xl:grid-cols-[360px_minmax(420px,0.95fr)_minmax(560px,1.05fr)] xl:grid-cols-[320px_1fr]", children: [_jsxs("aside", { className: `${mobilePanel === 'blocks' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx(ReviewChecklist, { blocks: blocks, pages: pages, activePage: activePage, dirty: dirty, isBusy: isBusy, onGoPage: (page) => {
+    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "surface flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs(Link, { to: "/dashboard", className: "inline-flex items-center gap-2 text-sm font-semibold text-brand", children: [_jsx(ArrowLeft, { size: 16 }), "Back"] }), _jsx("input", { className: "mt-2 w-full rounded-md border border-transparent bg-transparent px-0 text-2xl font-black text-ink outline-none transition focus:border-brand/30 focus:bg-white focus:px-3 sm:text-3xl", value: title, onChange: (event) => {
+                                    setTitle(event.target.value);
+                                    setDirty(true);
+                                }, "aria-label": "Note title" }), _jsxs("p", { className: "mt-1 text-sm font-bold text-ink", children: ["Status: ", data.status, isBusy ? ' - OCR is still running.' : '', dirty ? ' - unsaved changes' : lastSavedAt ? ` - saved ${lastSavedAt.toLocaleTimeString()}` : ''] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end", children: [canRetry && (_jsxs("button", { onClick: () => retryOcr.mutate(), disabled: retryOcr.isPending || isBusy, className: "primary-button", children: [_jsx(RotateCcw, { size: 18, className: retryOcr.isPending ? 'animate-spin' : '' }), retryOcr.isPending ? 'Retrying...' : 'Retry OCR'] })), _jsxs("button", { onClick: () => saveBlocks.mutate(), disabled: saveBlocks.isPending || isBusy || !dirty, className: "primary-button", children: [_jsx(Save, { size: 18 }), saveBlocks.isPending ? 'Saving...' : 'Save all pages'] }), _jsxs("button", { onClick: () => noteQuery.refetch(), disabled: noteQuery.isFetching, className: "secondary-button", children: [_jsx(RefreshCw, { size: 18, className: noteQuery.isFetching ? 'animate-spin' : '' }), noteQuery.isFetching ? 'Refreshing...' : 'Refresh'] }), _jsxs("button", { onClick: requestDelete, disabled: deleteNote.isPending, className: "secondary-button text-coral", children: [_jsx(Trash, { size: 18 }), deleteNote.isPending ? 'Deleting...' : 'Delete'] })] })] }), data.status === 'failed' && (_jsxs("div", { className: "surface border-coral/30 bg-coral/10 p-4", children: [_jsx("p", { className: "font-black text-coral", children: "OCR failed" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink", children: data.ocrError || 'Upload a clearer file, crop the page, improve contrast, or retry conversion.' })] })), _jsxs("div", { className: "surface flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:flex-wrap", children: [_jsxs("button", { className: "secondary-button", onClick: () => goPage(-1), disabled: pages.indexOf(activePage) <= 0, children: [_jsx(ChevronLeft, { size: 18 }), "Prev"] }), _jsx("select", { className: "field min-w-0", value: activePage, onChange: (event) => setActivePage(Number(event.target.value)), children: pages.map((page) => _jsxs("option", { value: page, children: ["Page ", page] }, page)) }), _jsxs("button", { className: "secondary-button", onClick: () => goPage(1), disabled: pages.indexOf(activePage) >= pages.length - 1, children: ["Next", _jsx(ChevronRight, { size: 18 })] })] }), _jsxs("button", { className: reviewOnly ? 'primary-button' : 'secondary-button', onClick: () => setReviewOnly((value) => !value), children: [_jsx(Filter, { size: 18 }), "Needs review ", lowConfidenceCount ? `(${lowConfidenceCount})` : ''] })] }), _jsx("div", { className: "surface grid grid-cols-3 gap-2 p-2 xl:hidden", children: ['blocks', 'original', 'edit'].map((panel) => (_jsx("button", { onClick: () => setMobilePanel(panel), className: mobilePanel === panel ? 'primary-button px-2 text-sm capitalize' : 'secondary-button px-2 text-sm capitalize', children: panel }, panel))) }), _jsxs("div", { className: "grid gap-5 xl:grid-cols-[300px_minmax(360px,0.9fr)_minmax(460px,1.1fr)]", children: [_jsxs("aside", { className: `${mobilePanel === 'blocks' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx(ReviewChecklist, { blocks: blocks, pages: pages, activePage: activePage, dirty: dirty, isBusy: isBusy, onGoPage: (page) => {
                                     setActivePage(page);
                                     setMobilePanel('edit');
                                 }, onReview: () => {
                                     setReviewOnly(true);
                                     setMobilePanel('edit');
-                                } }), _jsxs("div", { className: "surface p-5", children: [_jsx("h3", { className: "font-black text-ink", children: "Page blocks" }), _jsx("div", { className: "mt-4 max-h-[620px] space-y-3 overflow-auto pr-1", children: blocks.filter((block) => block.page === activePage).map((block) => (_jsxs("button", { onClick: () => setReviewOnly(false), className: `block w-full rounded-md border bg-white p-3 text-left shadow-sm ${block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-2 flex items-center justify-between gap-2 text-xs", children: [_jsxs("span", { className: "font-black uppercase text-brand", children: [block.type, " p", block.page] }), _jsxs("span", { className: block.confidence && block.confidence < 0.8 ? 'font-bold text-amber-700' : 'font-bold text-emerald-700', children: [Math.round((block.confidence || 0) * 100), "%"] })] }), _jsx("p", { className: "line-clamp-3 text-sm font-medium leading-6 text-ink", children: block.content })] }, block.localId))) })] }), _jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-ink", children: "Manual correction" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink/75", children: "Fix a repeated OCR mistake in this note and teach PenBot for the next retry." }), _jsxs("div", { className: "mt-3 space-y-2", children: [_jsx("input", { className: "field", placeholder: "Wrong word", value: wrong, onChange: (e) => setWrong(e.target.value) }), _jsx("input", { className: "field", placeholder: "Correct word", value: corrected, onChange: (e) => setCorrected(e.target.value) }), _jsx("button", { onClick: () => correction.mutate(), disabled: !wrong || !corrected || correction.isPending, className: "primary-button w-full", children: correction.isPending ? 'Applying...' : 'Apply correction' })] })] })] }), _jsx("aside", { className: "hidden 2xl:block", children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage }) }), _jsxs("section", { className: `${mobilePanel === 'edit' || mobilePanel === 'original' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx("div", { className: `${mobilePanel === 'original' ? 'block' : 'hidden'} xl:hidden`, children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage, compact: true }) }), _jsx("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: _jsx(BlockEditor, { blocks: blocks, page: activePage, reviewOnly: reviewOnly, onChange: updateBlock, onAdd: addBlock, onDelete: deleteBlock }) }), _jsx("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: _jsx(PagePreview, { blocks: blocks, page: activePage }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`, children: [_jsxs("button", { onClick: () => summarize.mutate(), disabled: summarize.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Sparkles, { size: 18 }), "Summary"] }), _jsxs("button", { onClick: () => flashcards.mutate(), disabled: flashcards.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Brain, { size: 18 }), "Flashcards"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(FileDown, { size: 18 }), "PDF"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(Download, { size: 18 }), "DOCX"] }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`), disabled: isBusy || dirty, className: "secondary-button", children: "MD" }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`), disabled: isBusy || dirty, className: "secondary-button", children: "TXT" })] }), _jsxs("div", { className: mobilePanel === 'edit' ? 'block' : 'hidden xl:block', children: [message && _jsx("p", { className: "text-sm font-semibold text-emerald-700", children: message }), dirty && _jsx("p", { className: "text-sm font-semibold text-amber-700", children: "Autosave will run shortly. Save before exporting." })] }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} gap-4 lg:grid-cols-2 xl:grid`, children: [summarize.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black", children: "Summary" }), _jsx("p", { className: "mt-2 text-sm font-medium leading-6 text-ink", children: summarize.data.data.summary }), _jsx("ul", { className: "mt-3 list-disc space-y-1 pl-5 text-sm font-medium text-ink", children: summarize.data.data.keyPoints.map((point) => _jsx("li", { children: point }, point)) })] })), flashcards.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black", children: "Flashcards" }), _jsx("div", { className: "mt-3 grid gap-2", children: flashcards.data.data.flashcards.map((card) => (_jsxs("div", { className: "rounded-md border border-ink/10 bg-paper/70 p-3 text-sm", children: [_jsx("p", { className: "font-bold text-brand", children: card.q }), _jsx("p", { className: "mt-1 font-medium text-ink", children: card.a })] }, card.q))) })] }))] })] })] })] }));
+                                } }), _jsxs("div", { className: "surface p-5", children: [_jsx("h3", { className: "font-black text-ink", children: "Page blocks" }), _jsx("div", { className: "mt-4 max-h-[620px] space-y-3 overflow-auto pr-1", children: blocks.filter((block) => block.page === activePage).map((block) => (_jsxs("button", { onClick: () => setReviewOnly(false), className: `block w-full rounded-md border bg-white p-3 text-left shadow-sm ${block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-2 flex items-center justify-between gap-2 text-xs", children: [_jsxs("span", { className: "font-black uppercase text-brand", children: [block.type, " p", block.page] }), _jsxs("span", { className: block.confidence && block.confidence < 0.8 ? 'font-bold text-amber-700' : 'font-bold text-emerald-700', children: [Math.round((block.confidence || 0) * 100), "%"] })] }), _jsx("p", { className: "line-clamp-3 text-sm font-medium leading-6 text-ink", children: block.content })] }, block.localId))) })] }), _jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-ink", children: "Manual correction" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink/75", children: "Fix a repeated OCR mistake in this note and teach PenBot for the next retry." }), _jsxs("div", { className: "mt-3 space-y-2", children: [_jsx("input", { className: "field", placeholder: "Wrong word", value: wrong, onChange: (e) => setWrong(e.target.value) }), _jsx("input", { className: "field", placeholder: "Correct word", value: corrected, onChange: (e) => setCorrected(e.target.value) }), _jsx("button", { onClick: () => correction.mutate(), disabled: !wrong || !corrected || correction.isPending, className: "primary-button w-full", children: correction.isPending ? 'Applying...' : 'Apply correction' })] })] })] }), _jsx("aside", { className: "hidden xl:block", children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage }) }), _jsxs("section", { className: `${mobilePanel === 'edit' || mobilePanel === 'original' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx("div", { className: `${mobilePanel === 'original' ? 'block' : 'hidden'} xl:hidden`, children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage, compact: true }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: [_jsxs("button", { type: "button", onClick: () => setShowEdit((prev) => !prev), className: "surface flex w-full items-center justify-between border border-ink/10 px-4 py-3 text-left font-black text-ink", children: [_jsx("span", { children: "Edit converted blocks" }), showEdit ? _jsx(ChevronUp, { size: 18, className: "text-brand" }) : _jsx(ChevronDown, { size: 18, className: "text-brand" })] }), _jsx("div", { className: `overflow-hidden transition-all duration-300 ${showEdit ? 'mt-3 max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`, children: _jsx(BlockEditor, { blocks: blocks, page: activePage, reviewOnly: reviewOnly, onChange: updateBlock, onAdd: addBlock, onDelete: deleteBlock }) })] }), _jsx("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: _jsx(PagePreview, { blocks: blocks, page: activePage, title: title }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`, children: [_jsxs("button", { onClick: () => summarize.mutate(), disabled: summarize.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Sparkles, { size: 18 }), "Summary"] }), _jsxs("button", { onClick: () => flashcards.mutate(), disabled: flashcards.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Brain, { size: 18 }), "Flashcards"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(FileDown, { size: 18 }), "PDF"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(Download, { size: 18 }), "DOCX"] }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`), disabled: isBusy || dirty, className: "secondary-button", children: "MD" }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`), disabled: isBusy || dirty, className: "secondary-button", children: "TXT" })] }), _jsxs("div", { className: mobilePanel === 'edit' ? 'block' : 'hidden xl:block', children: [message && _jsx("p", { className: "text-sm font-semibold text-emerald-700", children: message }), dirty && _jsx("p", { className: "text-sm font-semibold text-amber-700", children: "Autosave will run shortly. Save before exporting." })] }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} gap-4 lg:grid-cols-2 xl:grid`, children: [summarize.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black", children: "Summary" }), _jsx("p", { className: "mt-2 text-sm font-medium leading-6 text-ink", children: summarize.data.data.summary }), _jsx("ul", { className: "mt-3 list-disc space-y-1 pl-5 text-sm font-medium text-ink", children: summarize.data.data.keyPoints.map((point) => _jsx("li", { children: point }, point)) })] })), flashcards.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-black", children: "Flashcards" }), _jsx("div", { className: "mt-3 grid gap-2", children: flashcards.data.data.flashcards.map((card) => (_jsxs("div", { className: "rounded-md border border-ink/10 bg-paper/70 p-3 text-sm", children: [_jsx("p", { className: "font-bold text-brand", children: card.q }), _jsx("p", { className: "mt-1 font-medium text-ink", children: card.a })] }, card.q))) })] }))] })] })] })] }));
 }
