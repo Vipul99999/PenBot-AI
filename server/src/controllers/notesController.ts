@@ -1,13 +1,17 @@
 import { Response } from 'express';
 import path from 'node:path';
 import { z } from 'zod';
+import { Types } from 'mongoose';
 import { Note } from '../models/Note';
 import { AuthRequest } from '../middleware/auth';
 import { enqueueOCR } from '../queues/ocrQueue';
 import { aiClient } from '../services/aiClient';
 import { deleteStoredFile, openStoredFileStream, saveUpload } from '../services/fileStore';
+import { env } from '../config/env';
 
 const correctionSchema = z.object({ wrong: z.string().min(1), corrected: z.string().min(1) });
+const ocrModeSchema = z.enum(['fast', 'balanced', 'high_accuracy']);
+const documentTemplateSchema = z.enum(['study_notes', 'lab_report', 'exam_revision', 'formula_sheet', 'qa_worksheet']);
 const updateNoteSchema = z.object({
   title: z.string().min(1).max(120).optional(),
   extractedText: z.string().optional(),
@@ -34,7 +38,26 @@ function applyCorrection(text: string, wrong: string, corrected: string) {
 
 export async function uploadNote(req: AuthRequest, res: Response) {
   if (!req.file) return res.status(400).json({ message: 'File required' });
+  const userObjectId = new Types.ObjectId(String(req.userId));
+  const usage = await Note.aggregate([
+    { $match: { userId: userObjectId } },
+    { $group: { _id: '$userId', total: { $sum: '$originalSize' } } }
+  ]);
+  const currentBytes = usage[0]?.total || 0;
+  const maxBytes = env.maxUserStorageMb * 1024 * 1024;
+  if (currentBytes + req.file.size > maxBytes) {
+    return res.status(413).json({ message: `Storage limit reached. Delete old notes or increase MAX_USER_STORAGE_MB.` });
+  }
   const storedFile = await saveUpload(req.file);
+  let scanQuality: any = {};
+  try {
+    scanQuality = req.body.scanQuality ? JSON.parse(String(req.body.scanQuality)) : {};
+  } catch {
+    scanQuality = {};
+  }
+  const ocrMode = ocrModeSchema.safeParse(req.body.ocrMode).success ? req.body.ocrMode : 'balanced';
+  const documentTemplate = documentTemplateSchema.safeParse(req.body.documentTemplate).success ? req.body.documentTemplate : 'study_notes';
+  const maxPdfPages = Math.max(1, Math.min(100, Number(req.body.maxPdfPages || 25)));
   const note = await Note.create({
     userId: req.userId,
     title: path.parse(storedFile.filename).name || 'Untitled note',
@@ -42,6 +65,11 @@ export async function uploadNote(req: AuthRequest, res: Response) {
     originalFilename: storedFile.filename,
     originalMimeType: storedFile.mimetype,
     originalSize: storedFile.size,
+    scanQualityScore: typeof scanQuality.score === 'number' ? scanQuality.score : undefined,
+    scanQualityWarnings: Array.isArray(scanQuality.suggestions) ? scanQuality.suggestions.slice(0, 6) : [],
+    ocrMode,
+    documentTemplate,
+    maxPdfPages,
     status: 'queued'
   });
 
@@ -95,6 +123,7 @@ export async function retryOCR(req: AuthRequest, res: Response) {
   note.extractedText = '';
   note.structuredBlocks = [];
   note.tags = [];
+  note.retryCount = (note.retryCount || 0) + 1;
   await note.save();
 
   await enqueueOCR(note.id, String(req.userId));

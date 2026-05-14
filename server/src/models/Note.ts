@@ -56,6 +56,16 @@ export interface INote extends Document {
   corrections: Correction[];
   status: 'queued' | 'processing' | 'done' | 'failed';
   ocrError?: string;
+  processingStartedAt?: Date;
+  ocrEngine?: string;
+  ocrConfidence?: number;
+  ocrDurationMs?: number;
+  scanQualityScore?: number;
+  scanQualityWarnings: string[];
+  retryCount: number;
+  ocrMode?: 'fast' | 'balanced' | 'high_accuracy';
+  documentTemplate?: 'study_notes' | 'lab_report' | 'exam_revision' | 'formula_sheet' | 'qa_worksheet';
+  maxPdfPages?: number;
   createdAt: Date;
 }
 
@@ -86,7 +96,17 @@ const noteSchema = new Schema<INote>(
     tags: [{ type: String }],
     corrections: [{ wrong: String, corrected: String, createdAt: { type: Date, default: Date.now } }],
     status: { type: String, enum: ['queued', 'processing', 'done', 'failed'], default: 'queued' },
-    ocrError: { type: String, default: '' }
+    ocrError: { type: String, default: '' },
+    processingStartedAt: { type: Date },
+    ocrEngine: { type: String },
+    ocrConfidence: { type: Number },
+    ocrDurationMs: { type: Number },
+    scanQualityScore: { type: Number },
+    scanQualityWarnings: [{ type: String }],
+    retryCount: { type: Number, default: 0 },
+    ocrMode: { type: String, enum: ['fast', 'balanced', 'high_accuracy'], default: 'balanced' },
+    documentTemplate: { type: String, enum: ['study_notes', 'lab_report', 'exam_revision', 'formula_sheet', 'qa_worksheet'], default: 'study_notes' },
+    maxPdfPages: { type: Number, default: 25 }
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

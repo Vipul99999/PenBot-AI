@@ -3,6 +3,7 @@ import os
 import urllib.parse
 import urllib.request
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import fitz
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 
 from app.services.pipeline import apply_user_corrections, build_blocks, detect_tags, to_latex
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 router = APIRouter()
 
 
@@ -47,6 +48,16 @@ def get_trocr_model():
     model.to(device)
     model.eval()
     return processor, model, device
+
+
+def trocr_installed() -> bool:
+    try:
+        import torch  # noqa: F401
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 def pil_from_cv2(gray):
@@ -188,8 +199,8 @@ def segment_text_lines(image):
     return [image.crop(box) for box in boxes[: int(os.getenv("TROCR_MAX_LINES", "80"))]]
 
 
-def run_trocr(content: bytes) -> str:
-    if os.getenv("ENABLE_TROCR", "false").lower() != "true":
+def run_trocr(content: bytes, enabled: bool = True) -> str:
+    if not enabled:
         return ""
 
     try:
@@ -226,8 +237,8 @@ def ocr_image(image) -> str:
     return max(candidates, key=text_score).strip() if candidates else ""
 
 
-def ocr_image_variants(content: bytes) -> tuple[str, str]:
-    trocr_text = run_trocr(content)
+def ocr_image_variants(content: bytes, use_trocr: bool = True) -> tuple[str, str]:
+    trocr_text = run_trocr(content, enabled=use_trocr)
     candidates = [(text_score(trocr_text) + 120, "trocr", trocr_text)] if trocr_text else []
 
     for name, image in prepare_image_variants(content):
@@ -333,16 +344,27 @@ def extract_with_ocr_space(filename: str, content: bytes) -> str:
         return ""
 
 
-def extract_pdf_page_texts(document: fitz.Document) -> list[str]:
+def max_pdf_pages(requested: int | None = None) -> int:
+    if requested:
+        return max(1, min(100, int(requested)))
+    try:
+        return max(1, int(os.getenv("MAX_PDF_PAGES", "25")))
+    except ValueError:
+        return 25
+
+
+def extract_pdf_page_texts(document: fitz.Document, requested_max_pages: int | None = None, use_trocr: bool = True) -> tuple[list[str], bool]:
     pages: list[str] = []
-    for page in document:
+    limit = max_pdf_pages(requested_max_pages)
+    truncated = document.page_count > limit
+    for page in list(document)[:limit]:
         text = page.get_text("text").strip()
         if not text:
             pixmap = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
             image_bytes = pixmap.tobytes("png")
-            text, _variant = ocr_image_variants(image_bytes)
+            text, _variant = ocr_image_variants(image_bytes, use_trocr=use_trocr)
         pages.append(text.strip())
-    return pages
+    return pages, truncated
 
 
 def build_page_blocks(text: str, page_number: int) -> list[dict[str, Any]]:
@@ -367,12 +389,12 @@ def build_page_blocks(text: str, page_number: int) -> list[dict[str, Any]]:
     return cleaned or [{"type": "paragraph", "content": text, "confidence": 0.5, "page": page_number}]
 
 
-def extract_local_document(filename: str, content: bytes) -> dict[str, Any]:
+def extract_local_document(filename: str, content: bytes, requested_max_pages: int | None = None, use_trocr: bool = True) -> dict[str, Any]:
     lower_name = filename.lower()
     if lower_name.endswith(".pdf"):
         try:
             with fitz.open(stream=content, filetype="pdf") as document:
-                page_texts = extract_pdf_page_texts(document)
+                page_texts, truncated = extract_pdf_page_texts(document, requested_max_pages, use_trocr=use_trocr)
         except Exception as exc:
             raise HTTPException(status_code=400, detail="Could not read the uploaded PDF") from exc
 
@@ -387,9 +409,13 @@ def extract_local_document(filename: str, content: bytes) -> dict[str, Any]:
             corrected_page = str(page_text).strip()
             text_parts.append(f"Page {page_number}\n{corrected_page}")
             blocks.extend(build_page_blocks(corrected_page, page_number))
+        if truncated:
+            warning = f"Only the first {max_pdf_pages(requested_max_pages)} pages were converted to keep local OCR fast and low cost."
+            text_parts.append(warning)
+            blocks.append({"type": "important", "content": warning, "confidence": 1, "page": readable_pages[-1][0]})
         return {"text": "\n\n".join(text_parts), "blocks": blocks}
 
-    text, _variant = ocr_image_variants(content)
+    text, _variant = ocr_image_variants(content, use_trocr=use_trocr)
     if not text.strip():
         text = extract_with_ocr_space(filename, content)
     if not text.strip():
@@ -407,13 +433,22 @@ def apply_corrections_to_blocks(user_id: str, blocks: list[dict], corrections: d
 
 
 @router.post("/process")
-async def process_ocr(noteId: str = Form(...), userId: str = Form(...), file: UploadFile = File(...)):
+async def process_ocr(
+    noteId: str = Form(...),
+    userId: str = Form(...),
+    ocrMode: str = Form("balanced"),
+    documentTemplate: str = Form("study_notes"),
+    maxPdfPages: int = Form(25),
+    file: UploadFile = File(...),
+):
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     filename = file.filename or "upload"
-    local_note = extract_local_document(filename, content)
+    trocr_enabled = os.getenv("ENABLE_TROCR", "false").lower() == "true"
+    use_trocr = trocr_enabled and ocrMode == "high_accuracy"
+    local_note = extract_local_document(filename, content, maxPdfPages, use_trocr=use_trocr)
     corrected_text = apply_user_corrections(userId, local_note["text"], _CORRECTIONS)
     blocks = apply_corrections_to_blocks(userId, local_note["blocks"], _CORRECTIONS)
     return {
@@ -421,7 +456,9 @@ async def process_ocr(noteId: str = Form(...), userId: str = Form(...), file: Up
         "extractedText": corrected_text,
         "structuredBlocks": blocks,
         "tags": detect_tags(corrected_text),
-        "engine": "trocr" if os.getenv("ENABLE_TROCR", "false").lower() == "true" else "local",
+        "engine": "trocr-vit" if use_trocr else f"local-{ocrMode}",
+        "trocrAvailable": trocr_installed(),
+        "documentTemplate": documentTemplate,
     }
 
 

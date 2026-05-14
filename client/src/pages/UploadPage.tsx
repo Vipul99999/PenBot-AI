@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Crop, FileImage, FileText, RotateCcw, RotateCw, ScanLine, UploadCloud, Wand2 } from 'lucide-react';
 import { notesApi } from '@/api/notes';
+import { useAuthStore } from '@/store/authStore';
 
 type QualityReport = {
   score: number;
@@ -21,6 +22,8 @@ type CropSettings = {
   rotation: number;
 };
 type CropHandle = 'tl' | 'tr' | 'bl' | 'br' | 'move';
+type OcrMode = 'fast' | 'balanced' | 'high_accuracy';
+type DocumentTemplate = 'study_notes' | 'lab_report' | 'exam_revision' | 'formula_sheet' | 'qa_worksheet';
 
 function loadImage(file: File) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -171,6 +174,10 @@ function createDemoFile(kind: 'network' | 'math' | 'database') {
 export function UploadPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const settings = useAuthStore((s) => s.user?.settings);
+  const [ocrMode, setOcrMode] = useState<OcrMode>(settings?.ocrMode || 'balanced');
+  const [documentTemplate, setDocumentTemplate] = useState<DocumentTemplate>(settings?.documentTemplate || 'study_notes');
+  const [maxPdfPages, setMaxPdfPages] = useState(settings?.maxPdfPages || 25);
   const [error, setError] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [workingFile, setWorkingFile] = useState<File | null>(null);
@@ -182,7 +189,7 @@ export function UploadPage() {
   const cropFrameRef = useRef<HTMLDivElement | null>(null);
 
   const upload = useMutation({
-    mutationFn: (file: File) => notesApi.upload(file).then((r) => r.data),
+    mutationFn: (file: File) => notesApi.upload(file, quality, { ocrMode, documentTemplate, maxPdfPages }).then((r) => r.data),
     onSuccess: (note) => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
       navigate(`/dashboard/editor/${note._id}`);
@@ -342,6 +349,31 @@ export function UploadPage() {
         <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-ink/80">
           Choose a clear scan, image, or PDF. PenBot will convert it into readable digital notes.
         </p>
+      </div>
+
+      <div className="surface grid gap-4 p-5 md:grid-cols-3">
+        <label className="block">
+          <span className="text-xs font-black uppercase text-brand">OCR mode</span>
+          <select className="field mt-2" value={ocrMode} onChange={(event) => setOcrMode(event.target.value as OcrMode)}>
+            <option value="fast">Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="high_accuracy">High accuracy</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-xs font-black uppercase text-brand">Document template</span>
+          <select className="field mt-2" value={documentTemplate} onChange={(event) => setDocumentTemplate(event.target.value as DocumentTemplate)}>
+            <option value="study_notes">Study notes</option>
+            <option value="lab_report">Lab report</option>
+            <option value="exam_revision">Exam revision</option>
+            <option value="formula_sheet">Formula sheet</option>
+            <option value="qa_worksheet">Q&A worksheet</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-xs font-black uppercase text-brand">Max PDF pages</span>
+          <input className="field mt-2" type="number" min="1" max="100" value={maxPdfPages} onChange={(event) => setMaxPdfPages(Number(event.target.value))} />
+        </label>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">

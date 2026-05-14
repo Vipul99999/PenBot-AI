@@ -21,6 +21,20 @@ function notePreview(note) {
 function noteTitle(note) {
     return note.title || note.structuredBlocks?.find((block) => block.type === 'title')?.content || 'Untitled note';
 }
+function noteQuality(note) {
+    const blocks = Array.isArray(note.structuredBlocks) ? note.structuredBlocks : [];
+    const scored = blocks.filter((block) => typeof block.confidence === 'number');
+    const average = scored.length ? scored.reduce((total, block) => total + Number(block.confidence || 0), 0) / scored.length : Number(note.ocrConfidence || 0);
+    const low = blocks.filter((block) => (block.confidence || 0) < 0.8).length;
+    const percent = Math.round(Math.max(0, Math.min(1, average || 0)) * 100);
+    if (note.status !== 'done')
+        return null;
+    if (percent < 55)
+        return { label: 'Low confidence', className: 'bg-red-100 text-red-800', percent, low };
+    if (percent < 80 || low > 0)
+        return { label: 'Needs review', className: 'bg-amber-100 text-amber-800', percent, low };
+    return { label: 'Good scan', className: 'bg-emerald-100 text-emerald-800', percent, low };
+}
 export function DashboardPage() {
     const { data = [], isLoading, isError } = useQuery({
         queryKey: ['notes'],
@@ -55,6 +69,7 @@ export function DashboardPage() {
                         }) })] }), isLoading && _jsx("div", { className: "surface p-6", children: "Loading notes..." }), isError && _jsx("div", { className: "surface border-coral/30 bg-coral/10 p-6 font-medium text-coral", children: "Could not load notes. Check the backend connection." }), !isLoading && !isError && data.length === 0 && (_jsxs("div", { className: "surface grid gap-6 p-8 ring-1 ring-white md:grid-cols-[1fr_auto] md:items-center", children: [_jsxs("div", { children: [_jsx("h3", { className: "text-xl font-black text-ink", children: "Start with your first handwritten page" }), _jsx("p", { className: "mt-2 max-w-xl font-medium text-ink/80", children: "Upload a PDF or image and PenBot will create an editable note with OCR blocks." })] }), _jsxs(Link, { to: "/dashboard/upload", className: "primary-button", children: [_jsx(UploadCloud, { size: 18 }), "Upload note"] })] })), _jsx("div", { className: "grid gap-4 md:grid-cols-2 2xl:grid-cols-3", children: data.map((note) => {
                     const status = statusMeta[note.status] || statusMeta.queued;
                     const StatusIcon = status.icon;
-                    return (_jsxs(Link, { to: `/dashboard/editor/${note._id}`, className: "surface block p-5 ring-1 ring-white transition hover:-translate-y-0.5 hover:shadow-lg", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [_jsxs("span", { className: `badge ${status.className}`, children: [_jsx(StatusIcon, { size: 14, className: note.status === 'processing' ? 'animate-spin' : '' }), status.label] }), _jsx("span", { className: "text-xs font-bold text-ink/70", children: new Date(note.createdAt).toLocaleDateString() })] }), _jsx("h3", { className: "mb-2 line-clamp-2 text-lg font-black leading-6 text-ink", children: noteTitle(note) }), _jsx("p", { className: "min-h-16 text-sm font-medium leading-6 text-ink", children: notePreview(note) }), _jsx("div", { className: "mt-4 flex flex-wrap gap-2", children: (note.tags?.length ? note.tags : ['UNTAGGED']).slice(0, 3).map((tag) => (_jsx("span", { className: "badge bg-mist text-ink", children: tag }, tag))) })] }, note._id));
+                    const quality = noteQuality(note);
+                    return (_jsxs(Link, { to: `/dashboard/editor/${note._id}`, className: "surface block p-5 ring-1 ring-white transition hover:-translate-y-0.5 hover:shadow-lg", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between gap-3", children: [_jsxs("span", { className: `badge ${status.className}`, children: [_jsx(StatusIcon, { size: 14, className: note.status === 'processing' ? 'animate-spin' : '' }), status.label] }), _jsx("span", { className: "text-xs font-bold text-ink/70", children: new Date(note.createdAt).toLocaleDateString() })] }), _jsx("h3", { className: "mb-2 line-clamp-2 text-lg font-black leading-6 text-ink", children: noteTitle(note) }), _jsx("p", { className: "min-h-16 text-sm font-medium leading-6 text-ink", children: notePreview(note) }), _jsxs("div", { className: "mt-4 flex flex-wrap gap-2", children: [quality && (_jsxs("span", { className: `badge ${quality.className}`, children: [quality.label, " ", quality.percent, "%"] })), quality?.low ? _jsxs("span", { className: "badge bg-amber-100 text-amber-800", children: [quality.low, " review"] }) : null, typeof note.scanQualityScore === 'number' && _jsxs("span", { className: "badge bg-mist text-ink", children: ["Scan ", note.scanQualityScore, "/100"] }), (note.tags?.length ? note.tags : ['UNTAGGED']).slice(0, 3).map((tag) => (_jsx("span", { className: "badge bg-mist text-ink", children: tag }, tag)))] })] }, note._id));
                 }) })] }));
 }

@@ -71,6 +71,35 @@
     @apply flex items-center justify-between border-t border-ink/10 px-8 py-4 text-[10px] font-bold uppercase text-ink/55 sm:px-12;
   }
 
+  .doc-block-frame {
+    @apply relative rounded-md outline outline-2 outline-transparent transition;
+  }
+
+  .doc-block-frame:hover {
+    @apply outline-brand/25;
+  }
+
+  .doc-block-selected {
+    @apply outline-brand/70 ring-4 ring-brand/10;
+  }
+
+  .doc-block-weak {
+    @apply outline-amber-300/80 ring-4 ring-amber-100;
+  }
+
+  .doc-block-chip {
+    @apply pointer-events-none absolute -right-1 -top-3 z-10 hidden rounded-md bg-brand px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-sm;
+  }
+
+  .doc-block-selected .doc-block-chip,
+  .doc-block-frame:hover .doc-block-chip {
+    @apply block;
+  }
+
+  .doc-editable {
+    @apply rounded-sm outline-none transition focus:bg-white focus:ring-4 focus:ring-brand/10;
+  }
+
   .doc-title {
     @apply break-words border-b-2 border-brand/30 pb-3 text-center text-2xl font-black leading-tight text-ink sm:text-3xl;
   }
@@ -214,6 +243,10 @@
 
   .doc-table {
     @apply w-full border-collapse text-left text-sm;
+  }
+
+  .doc-table-editor {
+    @apply mb-3 min-h-20 w-full resize-y rounded-md border border-ink/15 bg-mist/40 px-3 py-2 font-mono text-xs font-semibold text-ink outline-none focus:border-brand focus:ring-4 focus:ring-brand/10;
   }
 
   .doc-table th {

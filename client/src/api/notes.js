@@ -1,8 +1,16 @@
 import { http } from './http';
 export const notesApi = {
-    upload: (file) => {
+    upload: (file, scanQuality, options) => {
         const fd = new FormData();
         fd.append('file', file);
+        if (scanQuality)
+            fd.append('scanQuality', JSON.stringify(scanQuality));
+        if (options?.ocrMode)
+            fd.append('ocrMode', options.ocrMode);
+        if (options?.documentTemplate)
+            fd.append('documentTemplate', options.documentTemplate);
+        if (options?.maxPdfPages)
+            fd.append('maxPdfPages', String(options.maxPdfPages));
         return http.post('/api/notes/upload', fd);
     },
     list: () => http.get('/api/notes'),

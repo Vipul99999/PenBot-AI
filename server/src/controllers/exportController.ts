@@ -104,11 +104,25 @@ function markdownFromBlocks(note: NonNullable<Awaited<ReturnType<typeof getOwned
     .join('\n\n');
 }
 
-function ensurePdfSpace(doc: PDFKit.PDFDocument, height: number) {
-  if (doc.y + height > doc.page.height - 72) doc.addPage();
+type PdfRenderContext = {
+  noteTitle: string;
+  sourcePage: number;
+  subPage: number;
+};
+
+function pageLabel(context: PdfRenderContext) {
+  return context.subPage > 1 ? `${context.sourcePage}.${context.subPage}` : String(context.sourcePage);
 }
 
-function drawPdfHeader(doc: PDFKit.PDFDocument, noteTitle: string, page: number) {
+function ensurePdfSpace(doc: PDFKit.PDFDocument, height: number, context: PdfRenderContext) {
+  if (doc.y + height <= doc.page.height - 72) return;
+  drawPdfFooter(doc);
+  doc.addPage();
+  context.subPage += 1;
+  drawPdfHeader(doc, context.noteTitle, pageLabel(context));
+}
+
+function drawPdfHeader(doc: PDFKit.PDFDocument, noteTitle: string, page: string | number) {
   doc.save();
   doc.rect(0, 0, doc.page.width, doc.page.height).fill('#ffffff');
   doc.rect(0, 0, doc.page.width, 54).fill('#f7f4ea');
@@ -128,16 +142,16 @@ function drawPdfFooter(doc: PDFKit.PDFDocument) {
   doc.restore();
 }
 
-function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFromNote>[number]) {
+function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFromNote>[number], context: PdfRenderContext) {
   if (block.type === 'title') {
-    ensurePdfSpace(doc, 76);
+    ensurePdfSpace(doc, 76, context);
     doc.moveDown(0.2).font('Helvetica-Bold').fontSize(22).fillColor('#18212f').text(block.content, 72, doc.y, { align: 'center', width: 450 });
     doc.moveDown(0.4).strokeColor('#99d2ca').lineWidth(1.5).moveTo(120, doc.y).lineTo(492, doc.y).stroke().moveDown(0.8);
     return;
   }
   if (block.type === 'heading' || block.type === 'subheading') {
     const height = doc.heightOfString(block.content, { width: 420 }) + 18;
-    ensurePdfSpace(doc, height + 12);
+    ensurePdfSpace(doc, height + 12, context);
     if (block.type === 'heading') {
       doc.roundedRect(72, doc.y, 468, height, 5).fill('#e8f2ef');
       doc.fillColor('#0f766e').rect(72, doc.y, 4, height).fill();
@@ -150,7 +164,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
   }
   if (block.type === 'bullet') {
     const height = Math.max(28, doc.heightOfString(block.content, { width: 420 }) + 12);
-    ensurePdfSpace(doc, height);
+    ensurePdfSpace(doc, height, context);
     doc.roundedRect(82, doc.y, 458, height, 4).fill('#f1f8f6');
     doc.circle(96, doc.y + 15, 3).fill('#0f766e');
     doc.fillColor('#18212f').font('Helvetica').fontSize(10.5).text(block.content, 108, doc.y + 8, { width: 410, lineGap: 4 });
@@ -160,7 +174,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
   if (block.type === 'numbered' || block.type === 'step') {
     const label = block.type === 'step' ? 'STEP' : 'ITEM';
     const height = Math.max(40, doc.heightOfString(block.content, { width: 392 }) + 18);
-    ensurePdfSpace(doc, height + 7);
+    ensurePdfSpace(doc, height + 7, context);
     doc.roundedRect(72, doc.y, 468, height, 6).fillAndStroke('#f1f8f6', '#99d2ca');
     doc.fillColor('#0f766e').font('Helvetica-Bold').fontSize(8).text(label, 88, doc.y + 12);
     doc.fillColor('#18212f').font('Helvetica-Bold').fontSize(10.5).text(block.content, 126, doc.y + 10, { width: 380, lineGap: 4 });
@@ -205,7 +219,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
       exam_tip: '#fdba74'
     };
     const height = Math.max(52, doc.heightOfString(block.content, { width: 420 }) + 30);
-    ensurePdfSpace(doc, height + 8);
+    ensurePdfSpace(doc, height + 8, context);
     doc.roundedRect(72, doc.y, 468, height, 6).fillAndStroke(fills[block.type] || '#fff7d6', strokes[block.type] || '#e7c84a');
     doc.fillColor('#0f766e').font('Helvetica-Bold').fontSize(8).text(labels[block.type] || 'NOTE', 88, doc.y + 10);
     doc.fillColor('#18212f').font('Helvetica').fontSize(10.5).text(block.content, 88, doc.y + 25, { width: 420, lineGap: 4 });
@@ -214,7 +228,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
   }
   if (block.type === 'question' || block.type === 'answer') {
     const height = Math.max(42, doc.heightOfString(block.content, { width: 392 }) + 18);
-    ensurePdfSpace(doc, height + 7);
+    ensurePdfSpace(doc, height + 7, context);
     const bg = block.type === 'question' ? '#ffffff' : '#ecfdf5';
     const border = block.type === 'question' ? '#99d2ca' : '#a7f3d0';
     doc.roundedRect(72, doc.y, 468, height, 6).fillAndStroke(bg, border);
@@ -225,7 +239,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
     return;
   }
   if (block.type === 'formula') {
-    ensurePdfSpace(doc, 54);
+    ensurePdfSpace(doc, 54, context);
     doc.roundedRect(102, doc.y, 390, 46, 6).fillAndStroke('#ecfdf5', '#99d2ca');
     doc.fillColor('#0f766e').font('Helvetica-Bold').fontSize(8).text('FORMULA', 118, doc.y + 9);
     doc.fillColor('#18212f').font('Courier-Bold').fontSize(12).text(block.content, 118, doc.y + 23, { width: 358, align: 'center' });
@@ -238,7 +252,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
     const colCount = Math.max(1, ...rows.map((row) => row.length));
     const colWidth = 468 / colCount;
     const height = Math.max(34, rows.length * cellHeight + 22);
-    ensurePdfSpace(doc, height + 8);
+    ensurePdfSpace(doc, height + 8, context);
     doc.fillColor('#0f766e').font('Helvetica-Bold').fontSize(8).text('TABLE', 72, doc.y);
     doc.y += 14;
     rows.forEach((row, rowIndex) => {
@@ -255,7 +269,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
   }
   if (block.type === 'code') {
     const height = doc.heightOfString(block.content, { width: 420 }) + 24;
-    ensurePdfSpace(doc, height + 8);
+    ensurePdfSpace(doc, height + 8, context);
     doc.roundedRect(72, doc.y, 468, height, 6).fill('#18212f');
     doc.font('Courier').fontSize(9).fillColor('#ffffff').text(block.content, 88, doc.y + 12, { width: 430, lineGap: 3 });
     doc.font('Helvetica');
@@ -263,7 +277,7 @@ function drawPdfBlock(doc: PDFKit.PDFDocument, block: ReturnType<typeof blocksFr
     return;
   }
   const height = doc.heightOfString(block.content, { width: 468, lineGap: 5 });
-  ensurePdfSpace(doc, height + 10);
+  ensurePdfSpace(doc, height + 10, context);
   doc.font('Helvetica').fontSize(10.5).fillColor('#18212f').text(block.content, 72, doc.y, { width: 468, lineGap: 5 });
   doc.moveDown(0.5);
 }
@@ -325,11 +339,12 @@ export async function exportPdf(req: AuthRequest, res: Response) {
   doc.pipe(res);
   pagesFromBlocks(note).forEach(([page, blocks], pageIndex) => {
     if (pageIndex > 0) doc.addPage();
-    drawPdfHeader(doc, note.title, page);
+    const context = { noteTitle: note.title, sourcePage: page, subPage: 1 };
+    drawPdfHeader(doc, note.title, pageLabel(context));
     if (!blocks.some((block) => block.type === 'title')) {
-      drawPdfBlock(doc, { type: 'title', content: note.title, page });
+      drawPdfBlock(doc, { type: 'title', content: note.title, page }, context);
     }
-    blocks.forEach((block) => drawPdfBlock(doc, block));
+    blocks.forEach((block) => drawPdfBlock(doc, block, context));
     drawPdfFooter(doc);
   });
   doc.end();

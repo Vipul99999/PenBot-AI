@@ -2,10 +2,38 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileDown, Filter, Image as ImageIcon, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash, Trash2 } from 'lucide-react';
+import { ArrowLeft, Brain, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, FileDown, Filter, Image as ImageIcon, Eye, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash, Trash2 } from 'lucide-react';
 import { notesApi } from '@/api/notes';
 import { http } from '@/api/http';
 const blockTypes = ['title', 'heading', 'subheading', 'paragraph', 'bullet', 'numbered', 'step', 'definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer', 'table', 'formula', 'code'];
+function confidenceSummary(blocks, note) {
+    const scored = blocks.filter((block) => typeof block.confidence === 'number');
+    const average = scored.length
+        ? scored.reduce((total, block) => total + Number(block.confidence || 0), 0) / scored.length
+        : Number(note?.ocrConfidence || 0);
+    const low = blocks.filter((block) => (block.confidence || 0) < 0.8).length;
+    const empty = blocks.filter((block) => !block.content.trim()).length;
+    const percent = Math.round(Math.max(0, Math.min(1, average || 0)) * 100);
+    let label = 'Good scan';
+    let detail = 'Most converted blocks look reliable.';
+    let className = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    if (percent < 55 || empty > 0) {
+        label = 'Low confidence';
+        detail = 'Review the original beside the converted page before exporting.';
+        className = 'border-red-200 bg-red-50 text-red-800';
+    }
+    else if (percent < 80 || low > 0) {
+        label = 'Needs review';
+        detail = `${low} block${low === 1 ? '' : 's'} should be checked before export.`;
+        className = 'border-amber-200 bg-amber-50 text-amber-800';
+    }
+    return { percent, low, empty, label, detail, className };
+}
+function OcrQualityCard({ blocks, note }) {
+    const summary = confidenceSummary(blocks, note);
+    const warnings = Array.isArray(note?.scanQualityWarnings) ? note.scanQualityWarnings.slice(0, 3) : [];
+    return (_jsxs("div", { className: `rounded-lg border p-4 ${summary.className}`, children: [_jsxs("div", { className: "flex items-start justify-between gap-3", children: [_jsxs("div", { children: [_jsx("p", { className: "text-xs font-black uppercase opacity-80", children: "OCR result score" }), _jsx("h3", { className: "mt-1 text-xl font-black", children: summary.label }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 opacity-90", children: summary.detail })] }), _jsxs("span", { className: "rounded-md bg-white/75 px-3 py-1 text-lg font-black", children: [summary.percent, "%"] })] }), _jsxs("div", { className: "mt-3 grid gap-2 text-sm font-bold sm:grid-cols-3", children: [_jsxs("span", { children: ["Weak blocks: ", summary.low] }), _jsxs("span", { children: ["Scan score: ", typeof note?.scanQualityScore === 'number' ? `${note.scanQualityScore}/100` : 'Not measured'] }), _jsxs("span", { children: ["Engine: ", note?.ocrEngine || 'local OCR'] })] }), warnings.length > 0 && (_jsx("ul", { className: "mt-3 grid gap-1 text-sm font-semibold leading-6 opacity-90", children: warnings.map((warning) => _jsxs("li", { children: ["- ", warning] }, warning)) }))] }));
+}
 function ReviewChecklist({ blocks, pages, activePage, dirty, isBusy, onGoPage, onReview }) {
     const emptyPages = pages.filter((page) => !blocks.some((block) => block.page === page && block.content.trim()));
     const lowConfidence = blocks.filter((block) => (block.confidence || 0) < 0.8);
@@ -85,6 +113,41 @@ function parseTable(content) {
     })
         .filter((row) => row.length > 1);
 }
+function blockWeight(block) {
+    const words = block.content.split(/\s+/).filter(Boolean).length;
+    if (block.type === 'title')
+        return 3;
+    if (['heading', 'subheading'].includes(block.type))
+        return 2;
+    if (block.type === 'table')
+        return Math.max(4, block.content.split(/\r?\n/).length * 1.4);
+    if (['definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer'].includes(block.type))
+        return Math.max(2.5, words / 14);
+    return Math.max(1.4, words / 18);
+}
+function paginateA4Blocks(blocks) {
+    const pages = [];
+    let current = [];
+    let weight = 0;
+    const maxWeight = 18;
+    blocks.forEach((block) => {
+        const nextWeight = blockWeight(block);
+        if (current.length && weight + nextWeight > maxWeight) {
+            pages.push(current);
+            current = [];
+            weight = 0;
+        }
+        current.push(block);
+        weight += nextWeight;
+    });
+    if (current.length)
+        pages.push(current);
+    return pages.length ? pages : [[]];
+}
+function EditableDocText({ block, className, as = 'div', onSelect, onChange }) {
+    const Tag = as;
+    return (_jsx(Tag, { className: `${className} doc-editable`, contentEditable: true, suppressContentEditableWarning: true, onFocus: () => onSelect(block.localId), onClick: () => onSelect(block.localId), onBlur: (event) => onChange(block.localId, event.currentTarget.innerText), children: block.content }));
+}
 function OriginalPreview({ blob, page, compact = false }) {
     const [url, setUrl] = useState('');
     useEffect(() => {
@@ -97,62 +160,67 @@ function OriginalPreview({ blob, page, compact = false }) {
     const pdfUrl = url ? `${url}#page=${page}&view=FitH` : '';
     return (_jsxs("div", { className: "surface sticky top-4 overflow-hidden", children: [_jsxs("div", { className: "flex items-center gap-2 border-b border-ink/15 bg-mist px-4 py-3", children: [_jsx(ImageIcon, { className: "text-brand", size: 18 }), _jsxs("div", { children: [_jsx("p", { className: "font-black text-ink", children: "Original upload" }), _jsxs("p", { className: "text-xs font-bold uppercase text-ink/70", children: ["Synced to page ", page] })] })] }), _jsxs("div", { className: `${compact ? 'max-h-[520px]' : 'max-h-[760px]'} overflow-auto bg-ink/5 p-3`, children: [!url && _jsx("p", { className: "rounded-lg bg-white p-4 text-sm font-semibold text-ink", children: "Original preview is loading." }), url && blob?.type === 'application/pdf' && (_jsx("object", { data: pdfUrl, type: "application/pdf", className: `${compact ? 'h-[500px]' : 'h-[720px]'} w-full rounded-lg border border-ink/10 bg-white`, children: _jsx("a", { className: "font-bold text-brand", href: pdfUrl, target: "_blank", rel: "noreferrer", children: "Open original PDF" }) }, pdfUrl)), url && blob?.type !== 'application/pdf' && (_jsx("img", { src: url, alt: "Original uploaded note", className: "mx-auto max-h-[720px] rounded-lg border border-ink/10 bg-white object-contain shadow-sm" }))] })] }));
 }
-function PagePreview({ blocks, page, title }) {
+function PagePreview({ blocks, page, title, selectedBlockId, onSelect, onChange }) {
     const pageBlocks = blocks.filter((block) => block.page === page);
+    const visualPages = paginateA4Blocks(pageBlocks);
     const hasTitle = pageBlocks.some((block) => block.type === 'title');
     let orderedIndex = 0;
     let stepIndex = 0;
-    return (_jsxs("article", { className: "a4-page", children: [_jsxs("div", { className: "a4-header", children: [_jsxs("div", { children: [_jsx("p", { className: "text-[10px] font-black uppercase text-brand", children: "PenBot AI converted document" }), _jsx("p", { className: "mt-1 max-w-[28rem] truncate text-sm font-black text-ink", children: title || 'Untitled note' })] }), _jsxs("span", { className: "rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand", children: ["Page ", page] })] }), _jsxs("div", { className: "a4-body", children: [!hasTitle && page === 1 && _jsx("h1", { className: "doc-title", children: title || 'Untitled note' }), !pageBlocks.length && _jsx("p", { className: "doc-paragraph", children: "No converted blocks on this page yet." }), pageBlocks.map((block) => {
-                        if (block.type === 'title')
-                            return _jsx("h1", { className: "doc-title", children: block.content }, block.localId);
-                        if (block.type === 'heading')
-                            return _jsx("h2", { className: "doc-heading", children: block.content }, block.localId);
-                        if (block.type === 'subheading')
-                            return _jsx("h3", { className: "doc-subheading", children: block.content }, block.localId);
-                        if (block.type === 'bullet')
-                            return _jsxs("div", { className: "doc-bullet", children: [_jsx("span", {}), " ", _jsx("p", { children: block.content })] }, block.localId);
-                        if (block.type === 'numbered')
-                            return _jsxs("div", { className: "doc-numbered", children: [_jsx("span", { children: ++orderedIndex }), _jsx("p", { children: block.content })] }, block.localId);
-                        if (block.type === 'step')
-                            return _jsxs("div", { className: "doc-step", children: [_jsxs("span", { children: ["Step ", ++stepIndex] }), _jsx("p", { children: block.content })] }, block.localId);
-                        if (block.type === 'definition')
-                            return _jsxs("div", { className: "doc-callout", children: [_jsx("p", { children: "Definition" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'theorem')
-                            return _jsxs("div", { className: "doc-callout doc-theorem", children: [_jsx("p", { children: "Theorem / Rule" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'important')
-                            return _jsxs("div", { className: "doc-callout doc-important", children: [_jsx("p", { children: "Important" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'example')
-                            return _jsxs("div", { className: "doc-callout doc-example", children: [_jsx("p", { children: "Example" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'objective')
-                            return _jsxs("div", { className: "doc-callout doc-objective", children: [_jsx("p", { children: "Objective" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'materials')
-                            return _jsxs("div", { className: "doc-callout doc-materials", children: [_jsx("p", { children: "Materials / Apparatus" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'observation')
-                            return _jsxs("div", { className: "doc-callout doc-observation", children: [_jsx("p", { children: "Observation" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'result')
-                            return _jsxs("div", { className: "doc-callout doc-result", children: [_jsx("p", { children: "Result" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'conclusion')
-                            return _jsxs("div", { className: "doc-callout doc-conclusion", children: [_jsx("p", { children: "Conclusion" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'exam_tip')
-                            return _jsxs("div", { className: "doc-callout doc-exam-tip", children: [_jsx("p", { children: "Exam tip" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'question' || block.type === 'answer')
-                            return _jsxs("div", { className: block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer', children: [_jsx("span", { children: block.type === 'question' ? 'Q' : 'A' }), _jsx("p", { children: block.content })] }, block.localId);
-                        if (block.type === 'table') {
-                            const rows = parseTable(block.content);
-                            return (_jsxs("div", { className: "doc-table-wrap", children: [_jsx("p", { children: "Table" }), _jsx("table", { className: "doc-table", children: _jsx("tbody", { children: rows.map((row, rowIndex) => (_jsx("tr", { children: row.map((cell, cellIndex) => rowIndex === 0 ? _jsx("th", { children: cell }, cellIndex) : _jsx("td", { children: cell }, cellIndex)) }, `${block.localId}-${rowIndex}`))) }) })] }, block.localId));
-                        }
-                        if (block.type === 'formula')
-                            return _jsxs("div", { className: "doc-formula", children: [_jsx("p", { children: "Formula" }), _jsx("div", { children: block.content })] }, block.localId);
-                        if (block.type === 'code')
-                            return _jsx("pre", { className: "doc-code", children: block.content }, block.localId);
-                        return _jsx("p", { className: "doc-paragraph", children: block.content }, block.localId);
-                    })] }), _jsxs("div", { className: "a4-footer", children: [_jsx("span", { children: "Edited and exported with PenBot AI" }), _jsx("span", { children: new Date().toLocaleDateString() })] })] }));
+    const frame = (block, children) => {
+        const weak = (block.confidence || 0) < 0.8;
+        return (_jsxs("div", { className: `doc-block-frame ${weak ? 'doc-block-weak' : ''} ${selectedBlockId === block.localId ? 'doc-block-selected' : ''}`, onClick: () => onSelect(block.localId), children: [_jsxs("span", { className: weak ? 'doc-block-chip bg-amber-600' : 'doc-block-chip', children: [block.type.replace('_', ' '), " ", Math.round((block.confidence || 0) * 100), "%"] }), children] }, block.localId));
+    };
+    return (_jsx("div", { className: "space-y-5", children: visualPages.map((visualBlocks, visualIndex) => (_jsxs("article", { className: "a4-page", children: [_jsxs("div", { className: "a4-header", children: [_jsxs("div", { children: [_jsx("p", { className: "text-[10px] font-black uppercase text-brand", children: "PenBot AI converted document" }), _jsx("p", { className: "mt-1 max-w-[28rem] truncate text-sm font-black text-ink", children: title || 'Untitled note' })] }), _jsxs("span", { className: "rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand", children: ["Page ", visualPages.length > 1 ? `${page}.${visualIndex + 1}` : page] })] }), _jsxs("div", { className: "a4-body", children: [!hasTitle && page === 1 && visualIndex === 0 && _jsx("h1", { className: "doc-title", children: title || 'Untitled note' }), !pageBlocks.length && _jsx("p", { className: "doc-paragraph", children: "No converted blocks on this page yet." }), visualBlocks.map((block) => {
+                            if (block.type === 'title')
+                                return frame(block, _jsx(EditableDocText, { block: block, as: "h1", className: "doc-title", onSelect: onSelect, onChange: onChange }));
+                            if (block.type === 'heading')
+                                return frame(block, _jsx(EditableDocText, { block: block, as: "h2", className: "doc-heading", onSelect: onSelect, onChange: onChange }));
+                            if (block.type === 'subheading')
+                                return frame(block, _jsx(EditableDocText, { block: block, as: "h3", className: "doc-subheading", onSelect: onSelect, onChange: onChange }));
+                            if (block.type === 'bullet')
+                                return frame(block, _jsxs("div", { className: "doc-bullet", children: [_jsx("span", {}), " ", _jsx(EditableDocText, { block: block, as: "p", className: "flex-1", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'numbered')
+                                return frame(block, _jsxs("div", { className: "doc-numbered", children: [_jsx("span", { children: ++orderedIndex }), _jsx(EditableDocText, { block: block, as: "p", className: "flex-1", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'step')
+                                return frame(block, _jsxs("div", { className: "doc-step", children: [_jsxs("span", { children: ["Step ", ++stepIndex] }), _jsx(EditableDocText, { block: block, as: "p", className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'definition')
+                                return frame(block, _jsxs("div", { className: "doc-callout", children: [_jsx("p", { children: "Definition" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'theorem')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-theorem", children: [_jsx("p", { children: "Theorem / Rule" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'important')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-important", children: [_jsx("p", { children: "Important" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'example')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-example", children: [_jsx("p", { children: "Example" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'objective')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-objective", children: [_jsx("p", { children: "Objective" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'materials')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-materials", children: [_jsx("p", { children: "Materials / Apparatus" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'observation')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-observation", children: [_jsx("p", { children: "Observation" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'result')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-result", children: [_jsx("p", { children: "Result" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'conclusion')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-conclusion", children: [_jsx("p", { children: "Conclusion" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'exam_tip')
+                                return frame(block, _jsxs("div", { className: "doc-callout doc-exam-tip", children: [_jsx("p", { children: "Exam tip" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'question' || block.type === 'answer')
+                                return frame(block, _jsxs("div", { className: block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer', children: [_jsx("span", { children: block.type === 'question' ? 'Q' : 'A' }), _jsx(EditableDocText, { block: block, as: "p", className: "flex-1", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'table') {
+                                const rows = parseTable(block.content);
+                                return frame(block, _jsxs("div", { className: "doc-table-wrap", children: [_jsx("p", { children: "Table" }), _jsx("textarea", { className: "doc-table-editor", value: block.content, onChange: (event) => onChange(block.localId, event.target.value), onFocus: () => onSelect(block.localId) }), _jsx("table", { className: "doc-table", children: _jsx("tbody", { children: rows.map((row, rowIndex) => (_jsx("tr", { children: row.map((cell, cellIndex) => rowIndex === 0 ? _jsx("th", { children: cell }, cellIndex) : _jsx("td", { children: cell }, cellIndex)) }, `${block.localId}-${rowIndex}`))) }) })] }));
+                            }
+                            if (block.type === 'formula')
+                                return frame(block, _jsxs("div", { className: "doc-formula", children: [_jsx("p", { children: "Formula" }), _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange })] }));
+                            if (block.type === 'code')
+                                return frame(block, _jsx("pre", { className: "doc-code", children: _jsx(EditableDocText, { block: block, className: "", onSelect: onSelect, onChange: onChange }) }));
+                            return frame(block, _jsx(EditableDocText, { block: block, as: "p", className: "doc-paragraph", onSelect: onSelect, onChange: onChange }));
+                        })] }), _jsxs("div", { className: "a4-footer", children: [_jsx("span", { children: "Edited and exported with PenBot AI" }), _jsx("span", { children: new Date().toLocaleDateString() })] })] }, `${page}-${visualIndex}`))) }));
 }
-function BlockEditor({ blocks, page, reviewOnly, onChange, onAdd, onDelete }) {
+function BlockEditor({ blocks, page, reviewOnly, selectedBlockId, onSelect, onChange, onAdd, onDelete }) {
     const pageBlocks = blocks.filter((block) => block.page === page && (!reviewOnly || (block.confidence || 0) < 0.8));
     return (_jsxs("div", { className: "surface p-4", children: [_jsxs("div", { className: "mb-4 flex flex-wrap items-center justify-between gap-3", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm font-black uppercase text-brand", children: "Editable blocks" }), _jsxs("h3", { className: "text-xl font-black text-ink", children: ["Page ", page] })] }), _jsxs("button", { className: "primary-button", onClick: () => onAdd(page), children: [_jsx(Plus, { size: 18 }), "Add block"] })] }), _jsxs("div", { className: "space-y-3", children: [!pageBlocks.length && _jsx("p", { className: "rounded-lg bg-mist p-4 text-sm font-bold text-ink", children: "No blocks match this view." }), pageBlocks.map((block) => {
                         const lowConfidence = (block.confidence || 0) < 0.8;
-                        return (_jsxs("div", { className: `rounded-lg border bg-white p-3 shadow-sm ${lowConfidence ? 'border-amber-300 ring-2 ring-amber-100' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-3 flex flex-wrap items-center gap-2", children: [_jsx("select", { className: "field min-w-0 flex-1 py-2 text-sm sm:max-w-44 sm:flex-none", value: block.type, onChange: (event) => onChange(block.localId, { type: event.target.value }), children: blockTypes.map((type) => _jsx("option", { value: type, children: type }, type)) }), _jsxs("span", { className: lowConfidence ? 'badge bg-amber-100 text-amber-800' : 'badge bg-emerald-100 text-emerald-800', children: [Math.round((block.confidence || 0) * 100), "%"] }), lowConfidence && _jsx("span", { className: "badge bg-amber-100 text-amber-800", children: "Needs review" }), _jsx("button", { className: "icon-button sm:ml-auto", onClick: () => onAdd(page, block.localId), title: "Add block after this one", children: _jsx(Plus, { size: 16 }) }), _jsx("button", { className: "icon-button text-coral", onClick: () => onDelete(block.localId), title: "Delete block", children: _jsx(Trash2, { size: 16 }) })] }), _jsx("textarea", { className: "field min-h-24 resize-y leading-7", value: block.content, onChange: (event) => onChange(block.localId, { content: event.target.value }) })] }, block.localId));
+                        return (_jsxs("div", { onFocus: () => onSelect(block.localId), onClick: () => onSelect(block.localId), className: `rounded-lg border bg-white p-3 shadow-sm ${selectedBlockId === block.localId ? 'border-brand ring-2 ring-brand/15' : lowConfidence ? 'border-amber-300 ring-2 ring-amber-100' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-3 flex flex-wrap items-center gap-2", children: [_jsx("select", { className: "field min-w-0 flex-1 py-2 text-sm sm:max-w-44 sm:flex-none", value: block.type, onChange: (event) => onChange(block.localId, { type: event.target.value }), children: blockTypes.map((type) => _jsx("option", { value: type, children: type }, type)) }), _jsxs("span", { className: lowConfidence ? 'badge bg-amber-100 text-amber-800' : 'badge bg-emerald-100 text-emerald-800', children: [Math.round((block.confidence || 0) * 100), "%"] }), lowConfidence && _jsx("span", { className: "badge bg-amber-100 text-amber-800", children: "Needs review" }), _jsx("button", { className: "icon-button sm:ml-auto", onClick: () => onAdd(page, block.localId), title: "Add block after this one", children: _jsx(Plus, { size: 16 }) }), _jsx("button", { className: "icon-button text-coral", onClick: () => onDelete(block.localId), title: "Delete block", children: _jsx(Trash2, { size: 16 }) })] }), _jsx("textarea", { className: "field min-h-24 resize-y leading-7", value: block.content, onChange: (event) => onChange(block.localId, { content: event.target.value }) })] }, block.localId));
                     })] })] }));
 }
 export function EditorPage() {
@@ -162,6 +230,7 @@ export function EditorPage() {
     const [blocks, setBlocks] = useState([]);
     const [title, setTitle] = useState('Untitled note');
     const [activePage, setActivePage] = useState(1);
+    const [selectedBlockId, setSelectedBlockId] = useState('');
     const [reviewOnly, setReviewOnly] = useState(false);
     const [mobilePanel, setMobilePanel] = useState('edit');
     const [dirty, setDirty] = useState(false);
@@ -170,6 +239,7 @@ export function EditorPage() {
     const [corrected, setCorrected] = useState('');
     const [message, setMessage] = useState('');
     const [showEdit, setShowEdit] = useState(true);
+    const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
     const noteQuery = useQuery({
         queryKey: ['note', id],
         queryFn: () => notesApi.get(id).then((r) => r.data),
@@ -193,6 +263,7 @@ export function EditorPage() {
         setTitle(data.title || nextBlocks.find((block) => block.type === 'title')?.content || 'Untitled note');
         setBlocks(nextBlocks);
         setActivePage(pagesFromBlocks(nextBlocks)[0] || 1);
+        setSelectedBlockId(nextBlocks[0]?.localId || '');
     }, [data, dirty]);
     useEffect(() => {
         const beforeUnload = (event) => {
@@ -258,6 +329,12 @@ export function EditorPage() {
     }
     function updateBlock(id, patch) {
         setBlocks((current) => current.map((block) => block.localId === id ? { ...block, ...patch } : block));
+        setSelectedBlockId(id);
+        setDirty(true);
+    }
+    function updateBlockContent(id, content) {
+        setBlocks((current) => current.map((block) => block.localId === id && block.content !== content ? { ...block, content } : block));
+        setSelectedBlockId(id);
         setDirty(true);
     }
     function addBlock(page, afterId) {
@@ -276,16 +353,25 @@ export function EditorPage() {
                 return [...current, newBlock];
             return [...current.slice(0, index + 1), newBlock, ...current.slice(index + 1)];
         });
+        setSelectedBlockId(newBlock.localId);
         setDirty(true);
     }
     function deleteBlock(id) {
         setBlocks((current) => current.filter((block) => block.localId !== id));
+        if (selectedBlockId === id)
+            setSelectedBlockId('');
         setDirty(true);
     }
     function goPage(direction) {
         const index = pages.indexOf(activePage);
         const nextPage = pages[Math.max(0, Math.min(pages.length - 1, index + direction))];
         setActivePage(nextPage || activePage);
+    }
+    async function previewPdf() {
+        const { data } = await http.get(notesApi.exportPdf(id).replace(http.defaults.baseURL || '', ''), { responseType: 'blob' });
+        if (pdfPreviewUrl)
+            URL.revokeObjectURL(pdfPreviewUrl);
+        setPdfPreviewUrl(URL.createObjectURL(data));
     }
     if (noteQuery.isLoading)
         return _jsx("div", { className: "surface p-6", children: "Loading note..." });
@@ -294,11 +380,15 @@ export function EditorPage() {
     return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "surface flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs(Link, { to: "/dashboard", className: "inline-flex items-center gap-2 text-sm font-semibold text-brand", children: [_jsx(ArrowLeft, { size: 16 }), "Back"] }), _jsx("input", { className: "mt-2 w-full rounded-md border border-transparent bg-transparent px-0 text-2xl font-black text-ink outline-none transition focus:border-brand/30 focus:bg-white focus:px-3 sm:text-3xl", value: title, onChange: (event) => {
                                     setTitle(event.target.value);
                                     setDirty(true);
-                                }, "aria-label": "Note title" }), _jsxs("p", { className: "mt-1 text-sm font-bold text-ink", children: ["Status: ", data.status, isBusy ? ' - OCR is still running.' : '', dirty ? ' - unsaved changes' : lastSavedAt ? ` - saved ${lastSavedAt.toLocaleTimeString()}` : ''] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end", children: [canRetry && (_jsxs("button", { onClick: () => retryOcr.mutate(), disabled: retryOcr.isPending || isBusy, className: "primary-button", children: [_jsx(RotateCcw, { size: 18, className: retryOcr.isPending ? 'animate-spin' : '' }), retryOcr.isPending ? 'Retrying...' : 'Retry OCR'] })), _jsxs("button", { onClick: () => saveBlocks.mutate(), disabled: saveBlocks.isPending || isBusy || !dirty, className: "primary-button", children: [_jsx(Save, { size: 18 }), saveBlocks.isPending ? 'Saving...' : 'Save all pages'] }), _jsxs("button", { onClick: () => noteQuery.refetch(), disabled: noteQuery.isFetching, className: "secondary-button", children: [_jsx(RefreshCw, { size: 18, className: noteQuery.isFetching ? 'animate-spin' : '' }), noteQuery.isFetching ? 'Refreshing...' : 'Refresh'] }), _jsxs("button", { onClick: requestDelete, disabled: deleteNote.isPending, className: "secondary-button text-coral", children: [_jsx(Trash, { size: 18 }), deleteNote.isPending ? 'Deleting...' : 'Delete'] })] })] }), data.status === 'failed' && (_jsxs("div", { className: "surface border-coral/30 bg-coral/10 p-4", children: [_jsx("p", { className: "font-black text-coral", children: "OCR failed" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink", children: data.ocrError || 'Upload a clearer file, crop the page, improve contrast, or retry conversion.' })] })), _jsxs("div", { className: "surface flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:flex-wrap", children: [_jsxs("button", { className: "secondary-button", onClick: () => goPage(-1), disabled: pages.indexOf(activePage) <= 0, children: [_jsx(ChevronLeft, { size: 18 }), "Prev"] }), _jsx("select", { className: "field min-w-0", value: activePage, onChange: (event) => setActivePage(Number(event.target.value)), children: pages.map((page) => _jsxs("option", { value: page, children: ["Page ", page] }, page)) }), _jsxs("button", { className: "secondary-button", onClick: () => goPage(1), disabled: pages.indexOf(activePage) >= pages.length - 1, children: ["Next", _jsx(ChevronRight, { size: 18 })] })] }), _jsxs("button", { className: reviewOnly ? 'primary-button' : 'secondary-button', onClick: () => setReviewOnly((value) => !value), children: [_jsx(Filter, { size: 18 }), "Needs review ", lowConfidenceCount ? `(${lowConfidenceCount})` : ''] })] }), _jsx("div", { className: "surface grid grid-cols-3 gap-2 p-2 xl:hidden", children: ['blocks', 'original', 'edit'].map((panel) => (_jsx("button", { onClick: () => setMobilePanel(panel), className: mobilePanel === panel ? 'primary-button px-2 text-sm capitalize' : 'secondary-button px-2 text-sm capitalize', children: panel }, panel))) }), _jsxs("div", { className: "grid gap-5 xl:grid-cols-[300px_minmax(360px,0.9fr)_minmax(460px,1.1fr)]", children: [_jsxs("aside", { className: `${mobilePanel === 'blocks' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx(ReviewChecklist, { blocks: blocks, pages: pages, activePage: activePage, dirty: dirty, isBusy: isBusy, onGoPage: (page) => {
+                                }, "aria-label": "Note title" }), _jsxs("p", { className: "mt-1 text-sm font-bold text-ink", children: ["Status: ", data.status, isBusy ? ' - OCR is still running.' : '', dirty ? ' - unsaved changes' : lastSavedAt ? ` - saved ${lastSavedAt.toLocaleTimeString()}` : ''] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:justify-end", children: [canRetry && (_jsxs("button", { onClick: () => retryOcr.mutate(), disabled: retryOcr.isPending || isBusy, className: "primary-button", children: [_jsx(RotateCcw, { size: 18, className: retryOcr.isPending ? 'animate-spin' : '' }), retryOcr.isPending ? 'Retrying...' : 'Retry OCR'] })), _jsxs("button", { onClick: () => saveBlocks.mutate(), disabled: saveBlocks.isPending || isBusy || !dirty, className: "primary-button", children: [_jsx(Save, { size: 18 }), saveBlocks.isPending ? 'Saving...' : 'Save all pages'] }), _jsxs("button", { onClick: () => noteQuery.refetch(), disabled: noteQuery.isFetching, className: "secondary-button", children: [_jsx(RefreshCw, { size: 18, className: noteQuery.isFetching ? 'animate-spin' : '' }), noteQuery.isFetching ? 'Refreshing...' : 'Refresh'] }), _jsxs("button", { onClick: requestDelete, disabled: deleteNote.isPending, className: "secondary-button text-coral", children: [_jsx(Trash, { size: 18 }), deleteNote.isPending ? 'Deleting...' : 'Delete'] })] })] }), data.status === 'failed' && (_jsxs("div", { className: "surface border-coral/30 bg-coral/10 p-4", children: [_jsx("p", { className: "font-black text-coral", children: "OCR failed" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink", children: data.ocrError || 'Upload a clearer file, crop the page, improve contrast, or retry conversion.' })] })), data.status === 'done' && _jsx(OcrQualityCard, { blocks: blocks, note: data }), _jsxs("div", { className: "surface flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between", children: [_jsxs("div", { className: "grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:flex-wrap", children: [_jsxs("button", { className: "secondary-button", onClick: () => goPage(-1), disabled: pages.indexOf(activePage) <= 0, children: [_jsx(ChevronLeft, { size: 18 }), "Prev"] }), _jsx("select", { className: "field min-w-0", value: activePage, onChange: (event) => setActivePage(Number(event.target.value)), children: pages.map((page) => _jsxs("option", { value: page, children: ["Page ", page] }, page)) }), _jsxs("button", { className: "secondary-button", onClick: () => goPage(1), disabled: pages.indexOf(activePage) >= pages.length - 1, children: ["Next", _jsx(ChevronRight, { size: 18 })] })] }), _jsxs("button", { className: reviewOnly ? 'primary-button' : 'secondary-button', onClick: () => setReviewOnly((value) => !value), children: [_jsx(Filter, { size: 18 }), "Needs review ", lowConfidenceCount ? `(${lowConfidenceCount})` : ''] })] }), _jsx("div", { className: "surface grid grid-cols-3 gap-2 p-2 xl:hidden", children: ['blocks', 'original', 'edit'].map((panel) => (_jsx("button", { onClick: () => setMobilePanel(panel), className: mobilePanel === panel ? 'primary-button px-2 text-sm capitalize' : 'secondary-button px-2 text-sm capitalize', children: panel }, panel))) }), _jsxs("div", { className: "grid gap-5 xl:grid-cols-[300px_minmax(360px,0.9fr)_minmax(460px,1.1fr)]", children: [_jsxs("aside", { className: `${mobilePanel === 'blocks' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx(ReviewChecklist, { blocks: blocks, pages: pages, activePage: activePage, dirty: dirty, isBusy: isBusy, onGoPage: (page) => {
                                     setActivePage(page);
                                     setMobilePanel('edit');
                                 }, onReview: () => {
                                     setReviewOnly(true);
                                     setMobilePanel('edit');
-                                } }), _jsxs("div", { className: "surface p-5", children: [_jsx("h3", { className: "font-black text-ink", children: "Page blocks" }), _jsx("div", { className: "mt-4 max-h-[620px] space-y-3 overflow-auto pr-1", children: blocks.filter((block) => block.page === activePage).map((block) => (_jsxs("button", { onClick: () => setReviewOnly(false), className: `block w-full rounded-md border bg-white p-3 text-left shadow-sm ${block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-2 flex items-center justify-between gap-2 text-xs", children: [_jsxs("span", { className: "font-black uppercase text-brand", children: [block.type, " p", block.page] }), _jsxs("span", { className: block.confidence && block.confidence < 0.8 ? 'font-bold text-amber-700' : 'font-bold text-emerald-700', children: [Math.round((block.confidence || 0) * 100), "%"] })] }), _jsx("p", { className: "line-clamp-3 text-sm font-medium leading-6 text-ink", children: block.content })] }, block.localId))) })] }), _jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-ink", children: "Manual correction" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink/75", children: "Fix a repeated OCR mistake in this note and teach PenBot for the next retry." }), _jsxs("div", { className: "mt-3 space-y-2", children: [_jsx("input", { className: "field", placeholder: "Wrong word", value: wrong, onChange: (e) => setWrong(e.target.value) }), _jsx("input", { className: "field", placeholder: "Correct word", value: corrected, onChange: (e) => setCorrected(e.target.value) }), _jsx("button", { onClick: () => correction.mutate(), disabled: !wrong || !corrected || correction.isPending, className: "primary-button w-full", children: correction.isPending ? 'Applying...' : 'Apply correction' })] })] })] }), _jsx("aside", { className: "hidden xl:block", children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage }) }), _jsxs("section", { className: `${mobilePanel === 'edit' || mobilePanel === 'original' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx("div", { className: `${mobilePanel === 'original' ? 'block' : 'hidden'} xl:hidden`, children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage, compact: true }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: [_jsxs("button", { type: "button", onClick: () => setShowEdit((prev) => !prev), className: "surface flex w-full items-center justify-between border border-ink/10 px-4 py-3 text-left font-black text-ink", children: [_jsx("span", { children: "Edit converted blocks" }), showEdit ? _jsx(ChevronUp, { size: 18, className: "text-brand" }) : _jsx(ChevronDown, { size: 18, className: "text-brand" })] }), _jsx("div", { className: `overflow-hidden transition-all duration-300 ${showEdit ? 'mt-3 max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`, children: _jsx(BlockEditor, { blocks: blocks, page: activePage, reviewOnly: reviewOnly, onChange: updateBlock, onAdd: addBlock, onDelete: deleteBlock }) })] }), _jsx("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: _jsx(PagePreview, { blocks: blocks, page: activePage, title: title }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`, children: [_jsxs("button", { onClick: () => summarize.mutate(), disabled: summarize.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Sparkles, { size: 18 }), "Summary"] }), _jsxs("button", { onClick: () => flashcards.mutate(), disabled: flashcards.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Brain, { size: 18 }), "Flashcards"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(FileDown, { size: 18 }), "PDF"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(Download, { size: 18 }), "DOCX"] }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`), disabled: isBusy || dirty, className: "secondary-button", children: "MD" }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`), disabled: isBusy || dirty, className: "secondary-button", children: "TXT" })] }), _jsxs("div", { className: mobilePanel === 'edit' ? 'block' : 'hidden xl:block', children: [message && _jsx("p", { className: "text-sm font-semibold text-emerald-700", children: message }), dirty && _jsx("p", { className: "text-sm font-semibold text-amber-700", children: "Autosave will run shortly. Save before exporting." })] }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} gap-4 lg:grid-cols-2 xl:grid`, children: [summarize.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black", children: "Summary" }), _jsx("p", { className: "mt-2 text-sm font-medium leading-6 text-ink", children: summarize.data.data.summary }), _jsx("ul", { className: "mt-3 list-disc space-y-1 pl-5 text-sm font-medium text-ink", children: summarize.data.data.keyPoints.map((point) => _jsx("li", { children: point }, point)) })] })), flashcards.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-black", children: "Flashcards" }), _jsx("div", { className: "mt-3 grid gap-2", children: flashcards.data.data.flashcards.map((card) => (_jsxs("div", { className: "rounded-md border border-ink/10 bg-paper/70 p-3 text-sm", children: [_jsx("p", { className: "font-bold text-brand", children: card.q }), _jsx("p", { className: "mt-1 font-medium text-ink", children: card.a })] }, card.q))) })] }))] })] })] })] }));
+                                } }), _jsxs("div", { className: "surface p-5", children: [_jsx("h3", { className: "font-black text-ink", children: "Page blocks" }), _jsx("div", { className: "mt-4 max-h-[620px] space-y-3 overflow-auto pr-1", children: blocks.filter((block) => block.page === activePage).map((block) => (_jsxs("button", { onClick: () => {
+                                                setReviewOnly(false);
+                                                setSelectedBlockId(block.localId);
+                                                setMobilePanel('edit');
+                                            }, className: `block w-full rounded-md border bg-white p-3 text-left shadow-sm ${selectedBlockId === block.localId ? 'border-brand ring-2 ring-brand/15' : block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'}`, children: [_jsxs("div", { className: "mb-2 flex items-center justify-between gap-2 text-xs", children: [_jsxs("span", { className: "font-black uppercase text-brand", children: [block.type, " p", block.page] }), _jsxs("span", { className: block.confidence && block.confidence < 0.8 ? 'font-bold text-amber-700' : 'font-bold text-emerald-700', children: [Math.round((block.confidence || 0) * 100), "%"] })] }), _jsx("p", { className: "line-clamp-3 text-sm font-medium leading-6 text-ink", children: block.content })] }, block.localId))) })] }), _jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-ink", children: "Manual correction" }), _jsx("p", { className: "mt-1 text-sm font-semibold leading-6 text-ink/75", children: "Fix a repeated OCR mistake in this note and teach PenBot for the next retry." }), _jsxs("div", { className: "mt-3 space-y-2", children: [_jsx("input", { className: "field", placeholder: "Wrong word", value: wrong, onChange: (e) => setWrong(e.target.value) }), _jsx("input", { className: "field", placeholder: "Correct word", value: corrected, onChange: (e) => setCorrected(e.target.value) }), _jsx("button", { onClick: () => correction.mutate(), disabled: !wrong || !corrected || correction.isPending, className: "primary-button w-full", children: correction.isPending ? 'Applying...' : 'Apply correction' })] })] })] }), _jsx("aside", { className: "hidden xl:block", children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage }) }), _jsxs("section", { className: `${mobilePanel === 'edit' || mobilePanel === 'original' ? 'block' : 'hidden'} space-y-4 xl:block`, children: [_jsx("div", { className: `${mobilePanel === 'original' ? 'block' : 'hidden'} xl:hidden`, children: _jsx(OriginalPreview, { blob: originalQuery.data, page: activePage, compact: true }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: [_jsxs("button", { type: "button", onClick: () => setShowEdit((prev) => !prev), className: "surface flex w-full items-center justify-between border border-ink/10 px-4 py-3 text-left font-black text-ink", children: [_jsx("span", { children: "Edit converted blocks" }), showEdit ? _jsx(ChevronUp, { size: 18, className: "text-brand" }) : _jsx(ChevronDown, { size: 18, className: "text-brand" })] }), _jsx("div", { className: `overflow-hidden transition-all duration-300 ${showEdit ? 'mt-3 max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`, children: _jsx(BlockEditor, { blocks: blocks, page: activePage, reviewOnly: reviewOnly, selectedBlockId: selectedBlockId, onSelect: setSelectedBlockId, onChange: updateBlock, onAdd: addBlock, onDelete: deleteBlock }) })] }), _jsx("div", { className: `${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`, children: _jsxs("div", { className: "surface p-3", children: [_jsxs("div", { className: "mb-3 flex flex-wrap items-center justify-between gap-2 px-1", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm font-black uppercase text-brand", children: "Editable document" }), _jsx("p", { className: "text-sm font-semibold text-ink/75", children: "Click text on the A4 page to correct it directly." })] }), selectedBlockId && _jsx("span", { className: "badge bg-mist text-ink", children: blocks.find((block) => block.localId === selectedBlockId)?.type.replace('_', ' ') || 'selected' })] }), _jsx(PagePreview, { blocks: blocks, page: activePage, title: title, selectedBlockId: selectedBlockId, onSelect: setSelectedBlockId, onChange: updateBlockContent })] }) }), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`, children: [_jsxs("button", { onClick: () => summarize.mutate(), disabled: summarize.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Sparkles, { size: 18 }), "Summary"] }), _jsxs("button", { onClick: () => flashcards.mutate(), disabled: flashcards.isPending || isBusy || dirty, className: "secondary-button", children: [_jsx(Brain, { size: 18 }), "Flashcards"] }), _jsxs("button", { onClick: () => previewPdf(), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(Eye, { size: 18 }), "Preview PDF"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(FileDown, { size: 18 }), "PDF"] }), _jsxs("button", { onClick: () => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`), disabled: isBusy || dirty, className: "secondary-button", children: [_jsx(Download, { size: 18 }), "DOCX"] }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`), disabled: isBusy || dirty, className: "secondary-button", children: "MD" }), _jsx("button", { onClick: () => downloadAuthenticated(notesApi.exportTxt(id), `note-${id}.txt`), disabled: isBusy || dirty, className: "secondary-button", children: "TXT" })] }), _jsxs("div", { className: mobilePanel === 'edit' ? 'block' : 'hidden xl:block', children: [message && _jsx("p", { className: "text-sm font-semibold text-emerald-700", children: message }), dirty && _jsx("p", { className: "text-sm font-semibold text-amber-700", children: "Autosave will run shortly. Save before exporting." })] }), pdfPreviewUrl && (_jsxs("div", { className: "surface overflow-hidden", children: [_jsxs("div", { className: "flex items-center justify-between border-b border-ink/10 bg-mist px-4 py-3", children: [_jsx("p", { className: "font-black text-ink", children: "PDF export preview" }), _jsx("button", { className: "secondary-button", onClick: () => { URL.revokeObjectURL(pdfPreviewUrl); setPdfPreviewUrl(''); }, children: "Close" })] }), _jsx("object", { data: pdfPreviewUrl, type: "application/pdf", className: "h-[720px] w-full bg-white", children: _jsx("a", { href: pdfPreviewUrl, target: "_blank", rel: "noreferrer", className: "p-4 font-bold text-brand", children: "Open PDF preview" }) })] })), _jsxs("div", { className: `${mobilePanel === 'edit' ? 'grid' : 'hidden'} gap-4 lg:grid-cols-2 xl:grid`, children: [summarize.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black", children: "Summary" }), _jsx("p", { className: "mt-2 text-sm font-medium leading-6 text-ink", children: summarize.data.data.summary }), _jsx("ul", { className: "mt-3 list-disc space-y-1 pl-5 text-sm font-medium text-ink", children: summarize.data.data.keyPoints.map((point) => _jsx("li", { children: point }, point)) })] })), flashcards.data && (_jsxs("div", { className: "surface p-5", children: [_jsx("h4", { className: "font-black text-black", children: "Flashcards" }), _jsx("div", { className: "mt-3 grid gap-2", children: flashcards.data.data.flashcards.map((card) => (_jsxs("div", { className: "rounded-md border border-ink/10 bg-paper/70 p-3 text-sm", children: [_jsx("p", { className: "font-bold text-brand", children: card.q }), _jsx("p", { className: "mt-1 font-medium text-ink", children: card.a })] }, card.q))) })] }))] })] })] })] }));
 }

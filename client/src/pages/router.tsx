@@ -12,10 +12,13 @@ import { LoginPage } from './LoginPage';
 import { RegisterPage } from './RegisterPage';
 import { ForgotPasswordPage } from './ForgotPasswordPage';
 import { ResetPasswordPage } from './ResetPasswordPage';
+import { AdminPage } from './AdminPage';
+import { SettingsPage } from './SettingsPage';
 
 function Home() {
   const token = useAuthStore((s) => s.token);
-  if (token) return <Navigate to="/dashboard" replace />;
+  const user = useAuthStore((s) => s.user);
+  if (token || user) return <Navigate to="/dashboard" replace />;
 
   return (
     <main className="min-h-screen bg-paper">
@@ -134,6 +137,8 @@ export function AppRouter() {
         <Route path="/dashboard/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
         <Route path="/dashboard/editor/:id" element={<ProtectedRoute><EditorPage /></ProtectedRoute>} />
         <Route path="/dashboard/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+        <Route path="/dashboard/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+        <Route path="/dashboard/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

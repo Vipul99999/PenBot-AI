@@ -24,6 +24,18 @@ function noteTitle(note: any) {
   return note.title || note.structuredBlocks?.find((block: any) => block.type === 'title')?.content || 'Untitled note';
 }
 
+function noteQuality(note: any) {
+  const blocks = Array.isArray(note.structuredBlocks) ? note.structuredBlocks : [];
+  const scored = blocks.filter((block: any) => typeof block.confidence === 'number');
+  const average = scored.length ? scored.reduce((total: number, block: any) => total + Number(block.confidence || 0), 0) / scored.length : Number(note.ocrConfidence || 0);
+  const low = blocks.filter((block: any) => (block.confidence || 0) < 0.8).length;
+  const percent = Math.round(Math.max(0, Math.min(1, average || 0)) * 100);
+  if (note.status !== 'done') return null;
+  if (percent < 55) return { label: 'Low confidence', className: 'bg-red-100 text-red-800', percent, low };
+  if (percent < 80 || low > 0) return { label: 'Needs review', className: 'bg-amber-100 text-amber-800', percent, low };
+  return { label: 'Good scan', className: 'bg-emerald-100 text-emerald-800', percent, low };
+}
+
 export function DashboardPage() {
   const { data = [], isLoading, isError } = useQuery({
     queryKey: ['notes'],
@@ -140,6 +152,7 @@ export function DashboardPage() {
         {data.map((note: any) => {
           const status = statusMeta[note.status] || statusMeta.queued;
           const StatusIcon = status.icon;
+          const quality = noteQuality(note);
           return (
             <Link to={`/dashboard/editor/${note._id}`} className="surface block p-5 ring-1 ring-white transition hover:-translate-y-0.5 hover:shadow-lg" key={note._id}>
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -152,6 +165,13 @@ export function DashboardPage() {
               <h3 className="mb-2 line-clamp-2 text-lg font-black leading-6 text-ink">{noteTitle(note)}</h3>
               <p className="min-h-16 text-sm font-medium leading-6 text-ink">{notePreview(note)}</p>
               <div className="mt-4 flex flex-wrap gap-2">
+                {quality && (
+                  <span className={`badge ${quality.className}`}>
+                    {quality.label} {quality.percent}%
+                  </span>
+                )}
+                {quality?.low ? <span className="badge bg-amber-100 text-amber-800">{quality.low} review</span> : null}
+                {typeof note.scanQualityScore === 'number' && <span className="badge bg-mist text-ink">Scan {note.scanQualityScore}/100</span>}
                 {(note.tags?.length ? note.tags : ['UNTAGGED']).slice(0, 3).map((tag: string) => (
                   <span key={tag} className="badge bg-mist text-ink">{tag}</span>
                 ))}

@@ -13,6 +13,7 @@ import {
   FileDown,
   Filter,
   Image as ImageIcon,
+  Eye,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -34,6 +35,56 @@ type EditableBlock = {
   page: number;
 };
 type MobilePanel = 'blocks' | 'original' | 'edit';
+
+function confidenceSummary(blocks: EditableBlock[], note?: any) {
+  const scored = blocks.filter((block) => typeof block.confidence === 'number');
+  const average = scored.length
+    ? scored.reduce((total, block) => total + Number(block.confidence || 0), 0) / scored.length
+    : Number(note?.ocrConfidence || 0);
+  const low = blocks.filter((block) => (block.confidence || 0) < 0.8).length;
+  const empty = blocks.filter((block) => !block.content.trim()).length;
+  const percent = Math.round(Math.max(0, Math.min(1, average || 0)) * 100);
+  let label = 'Good scan';
+  let detail = 'Most converted blocks look reliable.';
+  let className = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (percent < 55 || empty > 0) {
+    label = 'Low confidence';
+    detail = 'Review the original beside the converted page before exporting.';
+    className = 'border-red-200 bg-red-50 text-red-800';
+  } else if (percent < 80 || low > 0) {
+    label = 'Needs review';
+    detail = `${low} block${low === 1 ? '' : 's'} should be checked before export.`;
+    className = 'border-amber-200 bg-amber-50 text-amber-800';
+  }
+  return { percent, low, empty, label, detail, className };
+}
+
+function OcrQualityCard({ blocks, note }: { blocks: EditableBlock[]; note: any }) {
+  const summary = confidenceSummary(blocks, note);
+  const warnings = Array.isArray(note?.scanQualityWarnings) ? note.scanQualityWarnings.slice(0, 3) : [];
+  return (
+    <div className={`rounded-lg border p-4 ${summary.className}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase opacity-80">OCR result score</p>
+          <h3 className="mt-1 text-xl font-black">{summary.label}</h3>
+          <p className="mt-1 text-sm font-semibold leading-6 opacity-90">{summary.detail}</p>
+        </div>
+        <span className="rounded-md bg-white/75 px-3 py-1 text-lg font-black">{summary.percent}%</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-sm font-bold sm:grid-cols-3">
+        <span>Weak blocks: {summary.low}</span>
+        <span>Scan score: {typeof note?.scanQualityScore === 'number' ? `${note.scanQualityScore}/100` : 'Not measured'}</span>
+        <span>Engine: {note?.ocrEngine || 'local OCR'}</span>
+      </div>
+      {warnings.length > 0 && (
+        <ul className="mt-3 grid gap-1 text-sm font-semibold leading-6 opacity-90">
+          {warnings.map((warning: string) => <li key={warning}>- {warning}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function ReviewChecklist({
   blocks,
@@ -182,6 +233,62 @@ function parseTable(content: string) {
     .filter((row) => row.length > 1);
 }
 
+function blockWeight(block: EditableBlock) {
+  const words = block.content.split(/\s+/).filter(Boolean).length;
+  if (block.type === 'title') return 3;
+  if (['heading', 'subheading'].includes(block.type)) return 2;
+  if (block.type === 'table') return Math.max(4, block.content.split(/\r?\n/).length * 1.4);
+  if (['definition', 'theorem', 'important', 'example', 'objective', 'materials', 'observation', 'result', 'conclusion', 'exam_tip', 'question', 'answer'].includes(block.type)) return Math.max(2.5, words / 14);
+  return Math.max(1.4, words / 18);
+}
+
+function paginateA4Blocks(blocks: EditableBlock[]) {
+  const pages: EditableBlock[][] = [];
+  let current: EditableBlock[] = [];
+  let weight = 0;
+  const maxWeight = 18;
+  blocks.forEach((block) => {
+    const nextWeight = blockWeight(block);
+    if (current.length && weight + nextWeight > maxWeight) {
+      pages.push(current);
+      current = [];
+      weight = 0;
+    }
+    current.push(block);
+    weight += nextWeight;
+  });
+  if (current.length) pages.push(current);
+  return pages.length ? pages : [[]];
+}
+
+function EditableDocText({
+  block,
+  className,
+  as = 'div',
+  onSelect,
+  onChange
+}: {
+  block: EditableBlock;
+  className: string;
+  as?: keyof JSX.IntrinsicElements;
+  onSelect: (id: string) => void;
+  onChange: (id: string, content: string) => void;
+}) {
+  const Tag = as as any;
+  return (
+    <Tag
+      className={`${className} doc-editable`}
+      contentEditable
+      suppressContentEditableWarning
+      onFocus={() => onSelect(block.localId)}
+      onClick={() => onSelect(block.localId)}
+      onBlur={(event: any) => onChange(block.localId, event.currentTarget.innerText)}
+    >
+      {block.content}
+    </Tag>
+  );
+}
+
 function OriginalPreview({ blob, page, compact = false }: { blob?: Blob; page: number; compact?: boolean }) {
   const [url, setUrl] = useState('');
 
@@ -218,46 +325,77 @@ function OriginalPreview({ blob, page, compact = false }: { blob?: Blob; page: n
   );
 }
 
-function PagePreview({ blocks, page, title }: { blocks: EditableBlock[]; page: number; title: string }) {
+function PagePreview({
+  blocks,
+  page,
+  title,
+  selectedBlockId,
+  onSelect,
+  onChange
+}: {
+  blocks: EditableBlock[];
+  page: number;
+  title: string;
+  selectedBlockId?: string;
+  onSelect: (id: string) => void;
+  onChange: (id: string, content: string) => void;
+}) {
   const pageBlocks = blocks.filter((block) => block.page === page);
+  const visualPages = paginateA4Blocks(pageBlocks);
   const hasTitle = pageBlocks.some((block) => block.type === 'title');
   let orderedIndex = 0;
   let stepIndex = 0;
+  const frame = (block: EditableBlock, children: JSX.Element) => {
+    const weak = (block.confidence || 0) < 0.8;
+    return (
+    <div
+      key={block.localId}
+      className={`doc-block-frame ${weak ? 'doc-block-weak' : ''} ${selectedBlockId === block.localId ? 'doc-block-selected' : ''}`}
+      onClick={() => onSelect(block.localId)}
+    >
+      <span className={weak ? 'doc-block-chip bg-amber-600' : 'doc-block-chip'}>{block.type.replace('_', ' ')} {Math.round((block.confidence || 0) * 100)}%</span>
+      {children}
+    </div>
+    );
+  };
   return (
-    <article className="a4-page">
+    <div className="space-y-5">
+      {visualPages.map((visualBlocks, visualIndex) => (
+    <article className="a4-page" key={`${page}-${visualIndex}`}>
       <div className="a4-header">
         <div>
           <p className="text-[10px] font-black uppercase text-brand">PenBot AI converted document</p>
           <p className="mt-1 max-w-[28rem] truncate text-sm font-black text-ink">{title || 'Untitled note'}</p>
         </div>
-        <span className="rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand">Page {page}</span>
+        <span className="rounded-md border border-brand/20 bg-mist px-2 py-1 text-xs font-black text-brand">Page {visualPages.length > 1 ? `${page}.${visualIndex + 1}` : page}</span>
       </div>
       <div className="a4-body">
-        {!hasTitle && page === 1 && <h1 className="doc-title">{title || 'Untitled note'}</h1>}
+        {!hasTitle && page === 1 && visualIndex === 0 && <h1 className="doc-title">{title || 'Untitled note'}</h1>}
         {!pageBlocks.length && <p className="doc-paragraph">No converted blocks on this page yet.</p>}
-        {pageBlocks.map((block) => {
-          if (block.type === 'title') return <h1 key={block.localId} className="doc-title">{block.content}</h1>;
-          if (block.type === 'heading') return <h2 key={block.localId} className="doc-heading">{block.content}</h2>;
-          if (block.type === 'subheading') return <h3 key={block.localId} className="doc-subheading">{block.content}</h3>;
-          if (block.type === 'bullet') return <div key={block.localId} className="doc-bullet"><span /> <p>{block.content}</p></div>;
-          if (block.type === 'numbered') return <div key={block.localId} className="doc-numbered"><span>{++orderedIndex}</span><p>{block.content}</p></div>;
-          if (block.type === 'step') return <div key={block.localId} className="doc-step"><span>Step {++stepIndex}</span><p>{block.content}</p></div>;
-          if (block.type === 'definition') return <div key={block.localId} className="doc-callout"><p>Definition</p><div>{block.content}</div></div>;
-          if (block.type === 'theorem') return <div key={block.localId} className="doc-callout doc-theorem"><p>Theorem / Rule</p><div>{block.content}</div></div>;
-          if (block.type === 'important') return <div key={block.localId} className="doc-callout doc-important"><p>Important</p><div>{block.content}</div></div>;
-          if (block.type === 'example') return <div key={block.localId} className="doc-callout doc-example"><p>Example</p><div>{block.content}</div></div>;
-          if (block.type === 'objective') return <div key={block.localId} className="doc-callout doc-objective"><p>Objective</p><div>{block.content}</div></div>;
-          if (block.type === 'materials') return <div key={block.localId} className="doc-callout doc-materials"><p>Materials / Apparatus</p><div>{block.content}</div></div>;
-          if (block.type === 'observation') return <div key={block.localId} className="doc-callout doc-observation"><p>Observation</p><div>{block.content}</div></div>;
-          if (block.type === 'result') return <div key={block.localId} className="doc-callout doc-result"><p>Result</p><div>{block.content}</div></div>;
-          if (block.type === 'conclusion') return <div key={block.localId} className="doc-callout doc-conclusion"><p>Conclusion</p><div>{block.content}</div></div>;
-          if (block.type === 'exam_tip') return <div key={block.localId} className="doc-callout doc-exam-tip"><p>Exam tip</p><div>{block.content}</div></div>;
-          if (block.type === 'question' || block.type === 'answer') return <div key={block.localId} className={block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer'}><span>{block.type === 'question' ? 'Q' : 'A'}</span><p>{block.content}</p></div>;
+        {visualBlocks.map((block) => {
+          if (block.type === 'title') return frame(block, <EditableDocText block={block} as="h1" className="doc-title" onSelect={onSelect} onChange={onChange} />);
+          if (block.type === 'heading') return frame(block, <EditableDocText block={block} as="h2" className="doc-heading" onSelect={onSelect} onChange={onChange} />);
+          if (block.type === 'subheading') return frame(block, <EditableDocText block={block} as="h3" className="doc-subheading" onSelect={onSelect} onChange={onChange} />);
+          if (block.type === 'bullet') return frame(block, <div className="doc-bullet"><span /> <EditableDocText block={block} as="p" className="flex-1" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'numbered') return frame(block, <div className="doc-numbered"><span>{++orderedIndex}</span><EditableDocText block={block} as="p" className="flex-1" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'step') return frame(block, <div className="doc-step"><span>Step {++stepIndex}</span><EditableDocText block={block} as="p" className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'definition') return frame(block, <div className="doc-callout"><p>Definition</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'theorem') return frame(block, <div className="doc-callout doc-theorem"><p>Theorem / Rule</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'important') return frame(block, <div className="doc-callout doc-important"><p>Important</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'example') return frame(block, <div className="doc-callout doc-example"><p>Example</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'objective') return frame(block, <div className="doc-callout doc-objective"><p>Objective</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'materials') return frame(block, <div className="doc-callout doc-materials"><p>Materials / Apparatus</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'observation') return frame(block, <div className="doc-callout doc-observation"><p>Observation</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'result') return frame(block, <div className="doc-callout doc-result"><p>Result</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'conclusion') return frame(block, <div className="doc-callout doc-conclusion"><p>Conclusion</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'exam_tip') return frame(block, <div className="doc-callout doc-exam-tip"><p>Exam tip</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'question' || block.type === 'answer') return frame(block, <div className={block.type === 'question' ? 'doc-qa doc-question' : 'doc-qa doc-answer'}><span>{block.type === 'question' ? 'Q' : 'A'}</span><EditableDocText block={block} as="p" className="flex-1" onSelect={onSelect} onChange={onChange} /></div>);
           if (block.type === 'table') {
             const rows = parseTable(block.content);
-            return (
-              <div key={block.localId} className="doc-table-wrap">
+            return frame(block,
+              <div className="doc-table-wrap">
                 <p>Table</p>
+                <textarea className="doc-table-editor" value={block.content} onChange={(event) => onChange(block.localId, event.target.value)} onFocus={() => onSelect(block.localId)} />
                 <table className="doc-table">
                   <tbody>
                     {rows.map((row, rowIndex) => (
@@ -270,9 +408,9 @@ function PagePreview({ blocks, page, title }: { blocks: EditableBlock[]; page: n
               </div>
             );
           }
-          if (block.type === 'formula') return <div key={block.localId} className="doc-formula"><p>Formula</p><div>{block.content}</div></div>;
-          if (block.type === 'code') return <pre key={block.localId} className="doc-code">{block.content}</pre>;
-          return <p key={block.localId} className="doc-paragraph">{block.content}</p>;
+          if (block.type === 'formula') return frame(block, <div className="doc-formula"><p>Formula</p><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></div>);
+          if (block.type === 'code') return frame(block, <pre className="doc-code"><EditableDocText block={block} className="" onSelect={onSelect} onChange={onChange} /></pre>);
+          return frame(block, <EditableDocText block={block} as="p" className="doc-paragraph" onSelect={onSelect} onChange={onChange} />);
         })}
       </div>
       <div className="a4-footer">
@@ -280,6 +418,8 @@ function PagePreview({ blocks, page, title }: { blocks: EditableBlock[]; page: n
         <span>{new Date().toLocaleDateString()}</span>
       </div>
     </article>
+      ))}
+    </div>
   );
 }
 
@@ -287,6 +427,8 @@ function BlockEditor({
   blocks,
   page,
   reviewOnly,
+  selectedBlockId,
+  onSelect,
   onChange,
   onAdd,
   onDelete
@@ -294,6 +436,8 @@ function BlockEditor({
   blocks: EditableBlock[];
   page: number;
   reviewOnly: boolean;
+  selectedBlockId?: string;
+  onSelect: (id: string) => void;
   onChange: (id: string, patch: Partial<EditableBlock>) => void;
   onAdd: (page: number, afterId?: string) => void;
   onDelete: (id: string) => void;
@@ -318,7 +462,14 @@ function BlockEditor({
         {pageBlocks.map((block) => {
           const lowConfidence = (block.confidence || 0) < 0.8;
           return (
-            <div key={block.localId} className={`rounded-lg border bg-white p-3 shadow-sm ${lowConfidence ? 'border-amber-300 ring-2 ring-amber-100' : 'border-ink/15'}`}>
+            <div
+              key={block.localId}
+              onFocus={() => onSelect(block.localId)}
+              onClick={() => onSelect(block.localId)}
+              className={`rounded-lg border bg-white p-3 shadow-sm ${
+                selectedBlockId === block.localId ? 'border-brand ring-2 ring-brand/15' : lowConfidence ? 'border-amber-300 ring-2 ring-amber-100' : 'border-ink/15'
+              }`}
+            >
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <select className="field min-w-0 flex-1 py-2 text-sm sm:max-w-44 sm:flex-none" value={block.type} onChange={(event) => onChange(block.localId, { type: event.target.value as BlockType })}>
                   {blockTypes.map((type) => <option key={type} value={type}>{type}</option>)}
@@ -350,6 +501,7 @@ export function EditorPage() {
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
   const [title, setTitle] = useState('Untitled note');
   const [activePage, setActivePage] = useState(1);
+  const [selectedBlockId, setSelectedBlockId] = useState('');
   const [reviewOnly, setReviewOnly] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('edit');
   const [dirty, setDirty] = useState(false);
@@ -358,6 +510,7 @@ export function EditorPage() {
   const [corrected, setCorrected] = useState('');
   const [message, setMessage] = useState('');
   const [showEdit, setShowEdit] = useState(true);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
   const noteQuery = useQuery({
     queryKey: ['note', id],
     queryFn: () => notesApi.get(id).then((r) => r.data),
@@ -382,6 +535,7 @@ export function EditorPage() {
     setTitle(data.title || nextBlocks.find((block) => block.type === 'title')?.content || 'Untitled note');
     setBlocks(nextBlocks);
     setActivePage(pagesFromBlocks(nextBlocks)[0] || 1);
+    setSelectedBlockId(nextBlocks[0]?.localId || '');
   }, [data, dirty]);
 
   useEffect(() => {
@@ -451,6 +605,13 @@ export function EditorPage() {
 
   function updateBlock(id: string, patch: Partial<EditableBlock>) {
     setBlocks((current) => current.map((block) => block.localId === id ? { ...block, ...patch } : block));
+    setSelectedBlockId(id);
+    setDirty(true);
+  }
+
+  function updateBlockContent(id: string, content: string) {
+    setBlocks((current) => current.map((block) => block.localId === id && block.content !== content ? { ...block, content } : block));
+    setSelectedBlockId(id);
     setDirty(true);
   }
 
@@ -468,11 +629,13 @@ export function EditorPage() {
       if (index === -1) return [...current, newBlock];
       return [...current.slice(0, index + 1), newBlock, ...current.slice(index + 1)];
     });
+    setSelectedBlockId(newBlock.localId);
     setDirty(true);
   }
 
   function deleteBlock(id: string) {
     setBlocks((current) => current.filter((block) => block.localId !== id));
+    if (selectedBlockId === id) setSelectedBlockId('');
     setDirty(true);
   }
 
@@ -480,6 +643,12 @@ export function EditorPage() {
     const index = pages.indexOf(activePage);
     const nextPage = pages[Math.max(0, Math.min(pages.length - 1, index + direction))];
     setActivePage(nextPage || activePage);
+  }
+
+  async function previewPdf() {
+    const { data } = await http.get(notesApi.exportPdf(id).replace(http.defaults.baseURL || '', ''), { responseType: 'blob' });
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(URL.createObjectURL(data));
   }
 
   if (noteQuery.isLoading) return <div className="surface p-6">Loading note...</div>;
@@ -538,6 +707,8 @@ export function EditorPage() {
         </div>
       )}
 
+      {data.status === 'done' && <OcrQualityCard blocks={blocks} note={data} />}
+
       <div className="surface flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:flex-wrap">
           <button className="secondary-button" onClick={() => goPage(-1)} disabled={pages.indexOf(activePage) <= 0}><ChevronLeft size={18} />Prev</button>
@@ -588,8 +759,14 @@ export function EditorPage() {
               {blocks.filter((block) => block.page === activePage).map((block) => (
                 <button
                   key={block.localId}
-                  onClick={() => setReviewOnly(false)}
-                  className={`block w-full rounded-md border bg-white p-3 text-left shadow-sm ${block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'}`}
+                  onClick={() => {
+                    setReviewOnly(false);
+                    setSelectedBlockId(block.localId);
+                    setMobilePanel('edit');
+                  }}
+                  className={`block w-full rounded-md border bg-white p-3 text-left shadow-sm ${
+                    selectedBlockId === block.localId ? 'border-brand ring-2 ring-brand/15' : block.confidence && block.confidence < 0.8 ? 'border-amber-300' : 'border-ink/15'
+                  }`}
                 >
                   <div className="mb-2 flex items-center justify-between gap-2 text-xs">
                     <span className="font-black uppercase text-brand">{block.type} p{block.page}</span>
@@ -643,6 +820,8 @@ export function EditorPage() {
       blocks={blocks}
       page={activePage}
       reviewOnly={reviewOnly}
+      selectedBlockId={selectedBlockId}
+      onSelect={setSelectedBlockId}
       onChange={updateBlock}
       onAdd={addBlock}
       onDelete={deleteBlock}
@@ -650,12 +829,29 @@ export function EditorPage() {
   </div>
 </div>
           <div className={`${mobilePanel === 'edit' ? 'block' : 'hidden'} xl:block`}>
-            <PagePreview blocks={blocks} page={activePage} title={title} />
+            <div className="surface p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                <div>
+                  <p className="text-sm font-black uppercase text-brand">Editable document</p>
+                  <p className="text-sm font-semibold text-ink/75">Click text on the A4 page to correct it directly.</p>
+                </div>
+                {selectedBlockId && <span className="badge bg-mist text-ink">{blocks.find((block) => block.localId === selectedBlockId)?.type.replace('_', ' ') || 'selected'}</span>}
+              </div>
+              <PagePreview
+                blocks={blocks}
+                page={activePage}
+                title={title}
+                selectedBlockId={selectedBlockId}
+                onSelect={setSelectedBlockId}
+                onChange={updateBlockContent}
+              />
+            </div>
           </div>
 
           <div className={`${mobilePanel === 'edit' ? 'grid' : 'hidden'} surface grid-cols-2 gap-2 p-3 sm:flex sm:flex-wrap xl:flex`}>
             <button onClick={() => summarize.mutate()} disabled={summarize.isPending || isBusy || dirty} className="secondary-button"><Sparkles size={18} />Summary</button>
             <button onClick={() => flashcards.mutate()} disabled={flashcards.isPending || isBusy || dirty} className="secondary-button"><Brain size={18} />Flashcards</button>
+            <button onClick={() => previewPdf()} disabled={isBusy || dirty} className="secondary-button"><Eye size={18} />Preview PDF</button>
             <button onClick={() => downloadAuthenticated(notesApi.exportPdf(id), `note-${id}.pdf`)} disabled={isBusy || dirty} className="secondary-button"><FileDown size={18} />PDF</button>
             <button onClick={() => downloadAuthenticated(notesApi.exportDocx(id), `note-${id}.docx`)} disabled={isBusy || dirty} className="secondary-button"><Download size={18} />DOCX</button>
             <button onClick={() => downloadAuthenticated(notesApi.exportMarkdown(id), `note-${id}.md`)} disabled={isBusy || dirty} className="secondary-button">MD</button>
@@ -665,6 +861,18 @@ export function EditorPage() {
             {message && <p className="text-sm font-semibold text-emerald-700">{message}</p>}
             {dirty && <p className="text-sm font-semibold text-amber-700">Autosave will run shortly. Save before exporting.</p>}
           </div>
+
+          {pdfPreviewUrl && (
+            <div className="surface overflow-hidden">
+              <div className="flex items-center justify-between border-b border-ink/10 bg-mist px-4 py-3">
+                <p className="font-black text-ink">PDF export preview</p>
+                <button className="secondary-button" onClick={() => { URL.revokeObjectURL(pdfPreviewUrl); setPdfPreviewUrl(''); }}>Close</button>
+              </div>
+              <object data={pdfPreviewUrl} type="application/pdf" className="h-[720px] w-full bg-white">
+                <a href={pdfPreviewUrl} target="_blank" rel="noreferrer" className="p-4 font-bold text-brand">Open PDF preview</a>
+              </object>
+            </div>
+          )}
 
           <div className={`${mobilePanel === 'edit' ? 'grid' : 'hidden'} gap-4 lg:grid-cols-2 xl:grid`}>
             {summarize.data && (

@@ -1,23 +1,27 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { FileSearch, LayoutDashboard, LogOut, UploadCloud } from 'lucide-react';
+import { FileSearch, LayoutDashboard, LogOut, Settings, ShieldCheck, UploadCloud } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useAuthStore } from '@/store/authStore';
-
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/dashboard/upload', label: 'Upload', icon: UploadCloud },
-  { to: '/dashboard/search', label: 'Search', icon: FileSearch }
-];
+import { authApi } from '@/api/auth';
 
 export function Layout() {
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
 
-  const signOut = () => {
+  const signOut = async () => {
+    await authApi.logout().catch(() => undefined);
     logout();
     navigate('/login');
   };
+
+  const navItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/dashboard/upload', label: 'Upload', icon: UploadCloud },
+    { to: '/dashboard/search', label: 'Search', icon: FileSearch },
+    { to: '/dashboard/settings', label: 'Settings', icon: Settings },
+    ...(user?.role === 'admin' ? [{ to: '/dashboard/admin', label: 'Admin', icon: ShieldCheck }] : [])
+  ];
 
   return (
     <div className="min-h-screen bg-paper">
